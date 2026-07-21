@@ -1,0 +1,7 @@
+# Generator speed-vs-torque characteristic curve, for example/demo use.
+# speed [rev/min]   torque [N*m]
+30000               15.0
+40000               19.0
+50000               22.0
+60000               24.0
+70000               25.0

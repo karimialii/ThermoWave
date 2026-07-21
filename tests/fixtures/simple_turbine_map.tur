@@ -1,0 +1,45 @@
+       23
+************************ Turbine characteristics *********************
+Turbine
+A = N/sqrt(T03)
+B = m*sqrt(T03)/P03
+C = P03/P04
+E = Fraction
+N = Rotational speed [rev/min]
+P03 = Total pressure at Turbine inlet  [Bar]
+P04 = Total pressure at Turbine outlet  [Bar]
+T03 = Total temperature at Turbine inlet  [K]
+m   = mass flow [kg/s]
+************************* Conversion factors *************************
+       1       (A_fact) To convert to  [rev/s]/sqrt[K]
+       1     (B_fact) To convert to  [kg/s]*sqrt[K]/Bar
+       1    (C_fact) To convert to  pressure ratio
+       1   (E_fact) To convert to  fraction
+           1   Inertia
+           0   Option (0 = list eff vs nondim. mass flow, 1= list eff vs. speed)
+        2007  (Gas constant)
+           0  (Gas Constant scaling)
+           0  (total-total/total-static option, 0 = total-total, 1 = total-static)
+           0  (exit area)
+           0   Shaft Work Calculation Option(0 = Use Efficiency, 1 = Use Corrected work)
+           1  (Corrected work scaling factor)
+********************** Pressure Ratio vs Non-Dimensional Mass Flow
+           0     Angle
+          50
+           1            2            3   -999999999
+         1.8          2.0          1.9   -999999999
+          70
+           1            2            3   -999999999
+         2.0          2.4          2.2   -999999999
+-999999999 *** End of angle 0
+-999999999999 *** Terminator code
+********************** Efficiency Or Corrected Work vs Non-Dimensional Mass Flow
+           0     Angle
+          50
+           1            2            3   -999999999
+        0.80         0.86         0.83   -999999999
+          70
+           1            2            3   -999999999
+        0.82         0.88         0.85   -999999999
+-999999999 *** End of angle 0
+-999999999999 *** Terminator code

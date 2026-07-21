@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.DS_Store
+.claude/
+build/
+dist/
+
+# example/showcase run output written to repo root — regenerate via the
+# scripts in examples/, don't commit ad hoc; move curated ones to assets/images/
+/*.png
