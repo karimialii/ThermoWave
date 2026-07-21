@@ -7,6 +7,10 @@ __pycache__/
 .claude/
 build/
 dist/
+assets/
+examples/
+tutorials/
+
 
 # example/showcase run output written to repo root — regenerate via the
 # scripts in examples/, don't commit ad hoc; move curated ones to assets/images/
