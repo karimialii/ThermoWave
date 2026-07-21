@@ -22,9 +22,9 @@ GAMMA = 1005.0 / (1005.0 - 287.05)
 
 def _build_turboshaft(N0: float, inertia: float = 0.05):
     src = Source(name="src", P=101325.0, T=288.15, mdot=0.63)
-    comp = Compressor(name="comp", map_path="T100 Comp.cop", gamma=GAMMA, N=None)
-    heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-431000.0)
-    turb = Turbine(name="turb", map_path="T100 Turb.tur", gamma=GAMMA, N=None)
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
+    heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-300000.0)
+    turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
     shaft = Shaft(
         name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
         efficiency=0.98, inertia=inertia, dynamic=True, N0=N0,

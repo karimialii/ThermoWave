@@ -23,9 +23,9 @@ def _build_network_with_casings(N_shaft=65000.0):
     conducts through the turbine case and shaft to the compressor case."
     """
     src = Source(name="src", P=101325.0, T=288.15, mdot=0.63)
-    comp = Compressor(name="comp", map_path="T100 Comp.cop", gamma=GAMMA, N=N_shaft)
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=N_shaft)
     heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-431000.0)
-    turb = Turbine(name="turb", map_path="T100 Turb.tur", gamma=GAMMA, N=N_shaft)
+    turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=N_shaft)
     snk = Sink(name="snk")
 
     comp_casing = ThermalMass(name="comp_casing", thermal_capacitance=200.0, T0=300.0)

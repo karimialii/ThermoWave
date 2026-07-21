@@ -42,8 +42,8 @@ class _FakeShaftComponent:
 
 
 def _free_pair():
-    comp = Compressor(name="c1", map_path="T100 Comp.cop", gamma=GAMMA, N=None)
-    turb = Turbine(name="t1", map_path="T100 Turb.tur", gamma=GAMMA, N=None)
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
+    turb = Turbine(name="t1", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
     return comp, turb
 
 
@@ -66,7 +66,7 @@ def test_raises_if_fewer_than_two_components():
 
 
 def test_raises_if_any_component_free_param_not_declared_free():
-    comp = Compressor(name="c1", map_path="T100 Comp.cop", gamma=GAMMA, N=50000.0)
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=50000.0)
     _comp2, turb = _free_pair()
     with pytest.raises(ValueError, match="needs at least .* declaring"):
         Shaft(name="shaft", components=[comp, turb])
@@ -131,14 +131,14 @@ def test_report_metrics_includes_inertia():
 
 def test_shaft_end_to_end_locks_compressor_and_turbine_speed():
     src = Source(name="src", P=101325.0, T=288.15, mdot=0.63)
-    comp = Compressor(name="comp", map_path="T100 Comp.cop", gamma=GAMMA, N=None)
-    heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-431000.0)
-    turb = Turbine(name="turb", map_path="T100 Turb.tur", gamma=GAMMA, N=None)
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
+    heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-100000.0)
+    turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
     shaft = Shaft(name="shaft", components=[comp, turb], signs=[-1.0, 1.0], efficiency=0.98)
     snk = Sink(name="snk")
 
     turb_outlet_sensor = Sensor(name="turb_outlet_sensor")
-    target_T = 900.0
+    target_T = 500.0
     ctrl = Controller(
         name="ctrl",
         sensor=turb_outlet_sensor,

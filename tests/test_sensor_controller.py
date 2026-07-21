@@ -68,7 +68,7 @@ def test_sensor_report_metrics_omits_mdot_when_not_available():
 
 
 def test_controller_raises_if_free_param_not_declared_free():
-    comp = Compressor(name="c1", map_path="T100 Comp.cop", gamma=1.4, N=50000.0)
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=1.4, N=50000.0)
     sensor = Sensor(name="s1")
     with pytest.raises(ValueError, match="doesn't currently declare"):
         Controller(
@@ -82,7 +82,7 @@ def test_controller_raises_if_free_param_not_declared_free():
 
 
 def test_controller_residual_is_measured_minus_target():
-    comp = Compressor(name="c1", map_path="T100 Comp.cop", gamma=1.4, N=None)
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=1.4, N=None)
     sensor = Sensor(name="s1")
     ctrl = Controller(
         name="ctrl1", sensor=sensor, quantity="T [K]", component=comp, free_param="N", value=400.0
@@ -95,7 +95,7 @@ def test_controller_residual_is_measured_minus_target():
 
 
 def test_controller_ports_is_empty():
-    comp = Compressor(name="c1", map_path="T100 Comp.cop", gamma=1.4, N=None)
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=1.4, N=None)
     sensor = Sensor(name="s1")
     ctrl = Controller(
         name="ctrl1", sensor=sensor, quantity="T [K]", component=comp, free_param="N", value=400.0
@@ -108,7 +108,7 @@ def test_controller_drives_compressor_outlet_temperature_end_to_end():
     air = AIR
 
     src = Source(name="src", P=101325.0, T=288.15, mdot=0.63)
-    comp = Compressor(name="comp", map_path="T100 Comp.cop", gamma=gamma, N=None)
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=gamma, N=None)
     snk = Sink(name="snk")
     sensor = Sensor(name="outlet_sensor")
 

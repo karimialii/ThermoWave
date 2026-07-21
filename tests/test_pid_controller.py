@@ -34,7 +34,7 @@ class _FakeState:
 
 
 def _make_pid(**overrides):
-    comp = Compressor(name="c1", map_path="T100 Comp.cop", gamma=GAMMA, N=None)
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
     sensor = Sensor(name="s1")
     kwargs = dict(
         name="pid1", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
@@ -50,7 +50,7 @@ def _temp_state(fluid, node, P, T, params=None):
 
 
 def test_pid_raises_if_free_param_not_declared_free():
-    comp = Compressor(name="c1", map_path="T100 Comp.cop", gamma=GAMMA, N=50000.0)
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=50000.0)
     sensor = Sensor(name="s1")
     with pytest.raises(ValueError, match="doesn't currently declare"):
         PIDController(
@@ -131,7 +131,7 @@ def test_pid_report_metrics_reflects_setpoint_measured_error_and_output():
 
 def test_pid_controller_drives_compressor_outlet_temperature_over_transient():
     src = Source(name="src", P=101325.0, T=288.15, mdot=0.63)
-    comp = Compressor(name="comp", map_path="T100 Comp.cop", gamma=GAMMA, N=None)
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
     sensor = Sensor(name="s1")
     snk = Sink(name="snk")
 

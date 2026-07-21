@@ -31,25 +31,10 @@ result = net.solve()
 result.print_report()
 ```
 
-See `examples/` for 26 runnable scripts, one per feature/component, roughly
-ordered from simplest to most involved — a reference, not a learning path.
-For a guided, step-by-step introduction that builds up complex systems
-(a recuperated gas turbine, closed-loop PID control, a Rankine steam cycle,
-a boiler drum), see `tutorials/`. For everything at once — combined cycles
-with real maps, equilibrium combustion, steam bottoming cycles, part-load/
-emissions sweeps, spool-lag transients, and results-annotated plant
-diagrams — run `examples/25_combined_cycle_showcase.py` (T100-class
-microturbine, single shaft) and `examples/26_twin_spool_combined_cycle.py`
-(LM6000-class utility twin-spool: LP + HP compressors and turbines on
-separate spools; its four "LM6000-class" maps are the T100 map shapes
-scaled to GE's published design points via
-`generate_lm6000_class_maps.py`, since real utility OEM maps are
-proprietary). For validation against real measured data, run
-`examples/27_t100_validation_showcase.py`: a recuperated T100 with casing
-thermal masses and the machine's real two-loop control (fuel PID holding
-TOT, power PID commanding shaft speed), validated point-by-point against
-16 measured operating points from a T100 test rig, then driven through a
-multi-step power-dispatch transient.
+The full network model — every component, the solver, transient simulation,
+plotting, and the two-phase/Rankine machinery — is covered section by
+section below. See `tests/` for runnable, working usage of every component
+and network pattern described here.
 
 ## Install
 
@@ -304,8 +289,8 @@ keeps `Shaft`'s original steady-state-only behavior: components' speeds are
 tied to `components[0]`'s, which is a plain algebraic free parameter still
 needing an external `Setpoint`/`Controller` to pin down — appropriate for a
 governed engine, where speed is actively regulated rather than settling
-under its own inertia. See `tutorials/03_transient_rotor_dynamics/` (dynamic)
-and `examples/18_shaft_coupling.py` (governed).
+under its own inertia. See `tests/test_transient.py` for a dynamic
+spin-up example and `tests/test_shaft.py` for the governed case.
 
 **Volume dynamics**: `Tank(name, V, P0, T0, fluid, heat_loss=None)`
 (`src/thermowave/components/tank.py`) owns its own contents' `(P, h)` as
@@ -337,9 +322,8 @@ solve (same residual shape as `Controller`), but `self.output` only
 overshoot/offset/settling-time behavior. `step()`-able components (found
 by simple duck-typing, `hasattr(component, "step")`) are discovered and
 stepped automatically by `solve_transient()`, same as differential
-parameters — no separate argument needed. See
-`examples/21_pid_controller.py`, or `tutorials/04_closed_loop_control/` for
-multiple loops plus a time-varying setpoint.
+parameters — no separate argument needed. See `tests/test_pid_controller.py`
+for single- and multi-loop usage.
 
 ## Plotting
 
@@ -371,8 +355,8 @@ ThermoPlot(title="Compressor map").map(
 ```
 
 `.ax`/`.fig` are public attributes for any matplotlib call the class
-doesn't wrap directly. See `examples/23_advanced_plotting.py` for a full
-walkthrough (map + twin-axis + bar) built from one `Compressor` sweep.
+doesn't wrap directly. See `tests/test_plotting.py` for usage of each
+chart type.
 
 `TransientResult.plot(*series, ...)` and `plotting.plot_series(x, results,
 series, ...)` still work exactly as before — they're now thin wrappers
@@ -386,12 +370,10 @@ history.plot((comp, "power [W]"), (turb, "power [W]"), ylabel="power [W]")
 ```
 
 `plot_series()` is generic over any list of `SolveResult` with a matching
-x-axis, so it also covers manual parameter sweeps (e.g.
-`examples/14_compressor_all_cases.py`-style loops) — pass your own `x`
+x-axis, so it also covers manual parameter sweeps — pass your own `x`
 values and the `SolveResult` from each `network.solve()` call. Pass `ax=`
 to draw onto an existing `Axes` (for subplots), or `show=False,
-save_path=...` to save headlessly instead of popping up a window — see
-`tutorials/03_transient_rotor_dynamics/`.
+save_path=...` to save headlessly instead of popping up a window.
 
 ## Heat transfer
 
@@ -449,12 +431,11 @@ turb.heat_path = conv                                    # turbine's fluid loses
 casing.heat_sources = [(conv, 1.0), (to_ambient, -1.0)]   # casing gains conv's Q, loses to_ambient's
 ```
 
-See `examples/24_heat_transfer_network.py` for the full picture: a
+See `tests/test_heat_transfer_integration.py` for the full picture: a
 turboshaft where each machine convects into its own casing, the two
 casings conduct through a shaft `ThermalMass` between them, both casings
 convect to ambient, and the casings' temperatures actually change the
-cycle's predicted `T_out` — plotted warming up from a cold start with
-`ThermoPlot`.
+cycle's predicted `T_out`.
 
 ## Seeing combustion products
 
@@ -465,7 +446,7 @@ mole_fraction}` dict — instead of discarding everything but temperature. The
 major species (CO2, H2O, O2, N2, plus CO/NO if the mechanism produces them
 above a trace threshold) are also surfaced directly in `report_metrics()` as
 `"X_<species> [-]"`, so they show up in the printed Combustors table without
-calling anything extra. See `examples/22_fluid_mixtures_and_combustion_products.py`.
+calling anything extra. See `tests/test_combustor.py` for usage.
 
 This is genuine product chemistry (dissociation, excess-air/equivalence-ratio
 effects, trace NO from GRI-Mech, ...), and — when `Combustor`'s own inlet
@@ -573,10 +554,9 @@ outlet state, e.g. saturated vapor / a quality / N degrees of superheat, then
   control, and correspondingly a plain steady `Network.solve()` is *singular*
   in the drum level (there is no algebraic level to solve for). The Drum is
   therefore a transient component: its `state_derivative()` is what
-  `Network.solve_transient()` integrates. See
-  `tutorials/06_boiler_drum_transient/` for the level/pressure response to a
-  steam-demand step (including the pressure "shrink" on subcooled-feed
-  injection).
+  `Network.solve_transient()` integrates. See `tests/test_drum.py` for the
+  level/pressure response to a steam-demand step (including the pressure
+  "shrink" on subcooled-feed injection).
 - **`Pump` / `SteamTurbine`** — the entropy-based isentropic-path components a
   closed steam cycle needs. `Pump` closes the low-pressure side back to boiler
   pressure; `SteamTurbine` is the wet-steam-correct counterpart to
@@ -584,13 +564,13 @@ outlet state, e.g. saturated vapor / a quality / N degrees of superheat, then
   crosses into the dome), and reports exhaust quality `x_out` (blade-erosion
   concern). Both use `entropy_ph`/`enthalpy_ps`.
 
-`tutorials/05_rankine_steam_cycle/` builds these up step by step into a full
-Pump → boiler (superheat) → SteamTurbine → condenser cycle on water,
-reporting cycle efficiency (~30%) and wet-steam turbine exhaust. It is an
-**open** chain (a Source pins the feedwater, a Sink terminates the exhaust)
-— the unrolled equivalent of the closed cycle, since the solver requires a
-fixed boundary node and true recycle loops are out of scope (see the
-fluid-propagation section above).
+A full Pump → boiler (superheat) → SteamTurbine → condenser cycle on water
+(reporting cycle efficiency and wet-steam turbine exhaust) can be built the
+same way as the other network examples above. It is an **open** chain (a
+Source pins the feedwater, a Sink terminates the exhaust) — the unrolled
+equivalent of the closed cycle, since the solver requires a fixed boundary
+node and true recycle loops are out of scope (see the fluid-propagation
+section above).
 
 ## Roadmap
 

@@ -18,9 +18,9 @@ GAMMA = 1005.0 / (1005.0 - 287.05)
 
 def _build_dynamic_turboshaft(N0: float = 60000.0, inertia: float = 0.05):
     src = Source(name="src", P=101325.0, T=288.15, mdot=0.63)
-    comp = Compressor(name="comp", map_path="T100 Comp.cop", gamma=GAMMA, N=None)
-    heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-431000.0)
-    turb = Turbine(name="turb", map_path="T100 Turb.tur", gamma=GAMMA, N=None)
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
+    heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-300000.0)
+    turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
     shaft = Shaft(
         name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
         efficiency=0.98, inertia=inertia, dynamic=True, N0=N0,
@@ -89,14 +89,14 @@ def test_solve_transient_off_equilibrium_initial_condition_satisfies_backward_eu
     # well below the torque-balance speed found above.
     off_equilibrium = copy.copy(equilibrium)
     off_equilibrium.params = dict(equilibrium.params)
-    off_equilibrium.params["shaft.N"] = 55000.0
+    off_equilibrium.params["shaft.N"] = 50000.0
 
     dt = 0.05
     history = network.solve_transient(
         duration=dt, dt=dt, initial=off_equilibrium, tol=1e-8, max_iter=400, damping=0.3,
     )
     N0, N1 = history.diff_history["shaft.N"]
-    assert math.isclose(N0, 55000.0)
+    assert math.isclose(N0, 50000.0)
     assert N1 > N0  # below equilibrium -> net positive torque -> speeds up
 
     state = NetworkState(
