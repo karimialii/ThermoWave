@@ -18,7 +18,7 @@ air = IdealGasFluid(name="air", R=287.05, cp=1005.0)
 net = Network(fluid=air)
 
 src = Source(name="src", P=200000.0, T=300.0, mdot=1.0)
-pipe = Pipe(name="pipe", L=10.0, D=0.05, f=0.02)
+pipe = Pipe(name="pipe", L=10.0, D=0.1, f=0.02)
 sink = Sink(name="sink")
 
 net.add_component(src)
