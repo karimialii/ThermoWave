@@ -264,6 +264,32 @@ solver supplies it automatically:
   case `solve_transient()` runs an ordinary steady-state `Network.solve()`
   first to get a genuine equilibrium initial condition.
 
+**Adaptive time-stepping**: `solve_transient(..., adaptive=True, rtol=1e-3,
+atol=1e-6, dt_min=None, dt_max=None, safety=0.9, growth_limit=5.0,
+shrink_limit=0.2, max_step_shrinks=10)` — `dt` becomes the *initial* step
+size rather than a fixed one. Each step is tried once at the current size
+`h` and once as two `h/2` half-steps (step-doubling); since backward-Euler's
+local error is O(dt²), the difference between the two estimates the
+half-step (more accurate) result's own error. That result is kept if the
+weighted-RMS error across every differential state is within tolerance
+(`rtol`/`atol` combine the same way as `scipy.integrate.solve_ivp`: `scale =
+atol + rtol*|value|`), and the next step's size is rescaled accordingly
+(`safety*(1/err)**0.5`, clamped to `[shrink_limit, growth_limit]*h` and to
+`[dt_min, dt_max]`). A rejected step (error over tolerance, or the Newton
+solve itself failing to converge at that `h`) retries smaller without
+advancing time; `max_step_shrinks` caps retries before raising
+`ConvergenceError` rather than looping forever on a genuinely unsolvable
+step. Costs roughly 3x the nonlinear solves of a fixed-step run of the same
+duration — worth it for a network whose time constants vary enough across
+the run (e.g. a fast initial transient settling into a slow one) that no
+single fixed `dt` is efficient throughout. Requires at least one component
+declaring `differential_parameters()` (step-doubling's error estimate needs
+something to compare) — a network driven only by `step()`-able components
+(e.g. a lone `PIDController`) must use `adaptive=False`. See
+`tests/test_transient.py` for worked examples, including the `dt_max` clamp
+and the `step()`-called-once-per-accepted-step behavior with
+multi-component networks.
+
 `solve_transient()` takes no `shaft`/`setpoint`/similar arguments — it
 discovers what to integrate purely from what the network's own components
 declare, so it's the same code path for any current or future component

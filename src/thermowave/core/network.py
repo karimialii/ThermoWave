@@ -346,15 +346,28 @@ class Network:
         max_iter: int = 100,
         damping: float = 1.0,
         verbose: bool = False,
+        adaptive: bool = False,
+        rtol: float = 1e-3,
+        atol: float = 1e-6,
+        dt_min: float | None = None,
+        dt_max: float | None = None,
+        safety: float = 0.9,
+        growth_limit: float = 5.0,
+        shrink_limit: float = 0.2,
+        max_step_shrinks: int = 10,
     ) -> "TransientResult":
         """Quasi-steady transient over every differential state any
         component in this network declares (e.g. a dynamic Shaft's rotor
         speed) — see thermowave.core.transient.solve_transient() for the
-        full contract."""
+        full contract, including what adaptive/rtol/atol/dt_min/dt_max and
+        the rest of the step-size-control knobs do."""
         self.validate_topology()
         from thermowave.core.transient import solve_transient
 
         return solve_transient(
             self, duration, dt, initial=initial,
             tol=tol, max_iter=max_iter, damping=damping, verbose=verbose,
+            adaptive=adaptive, rtol=rtol, atol=atol, dt_min=dt_min, dt_max=dt_max,
+            safety=safety, growth_limit=growth_limit, shrink_limit=shrink_limit,
+            max_step_shrinks=max_step_shrinks,
         )
