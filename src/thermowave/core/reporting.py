@@ -2,15 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from thermowave.core.progress import ProgressBar
+
 if TYPE_CHECKING:
     from thermowave.core.solver import SolveResult
-
-_ITER_W = 8
-_NORM_W = 18
-
-
-def _iteration_rule(joint: str) -> str:
-    return "─" * _ITER_W + joint + "─" * _NORM_W + joint + "─" * _NORM_W
 
 
 def print_system_summary(n_unknowns: int, n_equations: int) -> None:
@@ -26,31 +21,56 @@ def print_system_summary(n_unknowns: int, n_equations: int) -> None:
         )
 
 
-def print_iteration_header(n_unknowns: int, tol: float, max_iter: int) -> None:
+def print_solve_header(n_unknowns: int, tol: float, max_iter: int) -> None:
     print(f"Newton-Raphson solve: {n_unknowns} unknowns, tol={tol:.2e}, max_iter={max_iter}")
-    print(_iteration_rule("┬"))
-    print(f"{'iter':^{_ITER_W}}│{'residual norm':^{_NORM_W}}│{'step norm':^{_NORM_W}}")
-    print(_iteration_rule("┼"))
 
 
-def print_iteration_row(iteration: int, residual_norm: float, step_norm: float) -> None:
-    print(f"{iteration:^{_ITER_W}d}│{residual_norm:^{_NORM_W}.4e}│{step_norm:^{_NORM_W}.4e}")
+def new_progress_bar() -> ProgressBar:
+    return ProgressBar()
 
 
-def print_iteration_footer(
-    converged: bool, iterations: int, residual_norm: float, tol: float
+def render_solve_progress(
+    bar: ProgressBar, iteration: int, max_iter: int, residual_norm: float, step_norm: float
 ) -> None:
-    print(_iteration_rule("┴"))
+    bar.render(
+        iteration / max_iter,
+        f"iter {iteration}/{max_iter}  residual={residual_norm:.3e}  step={step_norm:.3e}",
+    )
+
+
+def finish_solve_progress(
+    bar: ProgressBar, converged: bool, iterations: int, residual_norm: float, tol: float
+) -> None:
+    plural = "" if iterations == 1 else "s"
     if converged:
-        print(
-            f"Converged in {iterations} iterations "
-            f"(residual norm = {residual_norm:.4e} < tol = {tol:.2e})"
+        bar.finish(
+            f"Converged in {iterations} iteration{plural} "
+            f"(residual norm = {residual_norm:.4e} < tol = {tol:.2e})",
+            success=True,
         )
     else:
-        print(
+        bar.finish(
             f"Failed to converge after {iterations} iterations "
-            f"(residual norm = {residual_norm:.4e}, tol = {tol:.2e})"
+            f"(residual norm = {residual_norm:.4e}, tol = {tol:.2e})",
+            success=False,
         )
+
+
+def render_transient_progress(
+    bar: ProgressBar, t: float, duration: float, step: int, dt: float
+) -> None:
+    fraction = t / duration if duration > 0 else 1.0
+    bar.render(fraction, f"t={t:.4g}/{duration:.4g}s  step {step}  dt={dt:.4g}s")
+
+
+def finish_transient_progress(
+    bar: ProgressBar, steps: int, t: float, success: bool = True
+) -> None:
+    plural = "" if steps == 1 else "s"
+    if success:
+        bar.finish(f"Done: {steps} step{plural}, t = {t:.4g}s", success=True)
+    else:
+        bar.finish(f"Stopped after {steps} step{plural} at t = {t:.4g}s", success=False)
 
 
 # One column layout + title per report_category() — components sharing a

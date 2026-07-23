@@ -109,15 +109,17 @@ def newton_solve(
     if clamp_fn is not None:
         x = clamp_fn(x)
 
+    bar = None
     if verbose:
-        reporting.print_iteration_header(len(x), tol, max_iter)
+        reporting.print_solve_header(len(x), tol, max_iter)
+        bar = reporting.new_progress_bar()
 
     for iteration in range(1, max_iter + 1):
         F = residual_fn(x)
         residual_norm = float(np.linalg.norm(F))
         if residual_norm < tol:
-            if verbose:
-                reporting.print_iteration_footer(True, iteration - 1, residual_norm, tol)
+            if bar is not None:
+                reporting.finish_solve_progress(bar, True, iteration - 1, residual_norm, tol)
             return x, iteration - 1, residual_norm
 
         J = _finite_difference_jacobian(residual_fn, x, F)
@@ -126,8 +128,8 @@ def newton_solve(
         try:
             y = np.linalg.solve(J_scaled, -(r * F))
         except np.linalg.LinAlgError as exc:
-            if verbose:
-                reporting.print_iteration_footer(False, iteration - 1, residual_norm, tol)
+            if bar is not None:
+                reporting.finish_solve_progress(bar, False, iteration - 1, residual_norm, tol)
             raise ConvergenceError(
                 f"Singular Jacobian at iteration {iteration}: {exc}"
             ) from exc
@@ -136,8 +138,10 @@ def newton_solve(
         if step_limit_fn is not None:
             dx = step_limit_fn(x, dx)
         step = damping * dx
-        if verbose:
-            reporting.print_iteration_row(iteration, residual_norm, float(np.linalg.norm(step)))
+        if bar is not None:
+            reporting.render_solve_progress(
+                bar, iteration, max_iter, residual_norm, float(np.linalg.norm(step))
+            )
 
         x = x + step
         if clamp_fn is not None:
@@ -146,12 +150,12 @@ def newton_solve(
     F = residual_fn(x)
     residual_norm = float(np.linalg.norm(F))
     if residual_norm < tol:
-        if verbose:
-            reporting.print_iteration_footer(True, max_iter, residual_norm, tol)
+        if bar is not None:
+            reporting.finish_solve_progress(bar, True, max_iter, residual_norm, tol)
         return x, max_iter, residual_norm
 
-    if verbose:
-        reporting.print_iteration_footer(False, max_iter, residual_norm, tol)
+    if bar is not None:
+        reporting.finish_solve_progress(bar, False, max_iter, residual_norm, tol)
     raise ConvergenceError(
         f"Solver failed to converge after {max_iter} iterations "
         f"(residual norm={residual_norm:.3e}, tol={tol:.3e})"

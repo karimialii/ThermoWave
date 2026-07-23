@@ -107,7 +107,11 @@ def test_solver_solve_returns_converged_result_for_single_pipe_network():
     assert result.node_mdot["p1.out"] == pytest.approx(1.0)
 
 
-def test_newton_solve_verbose_prints_iteration_table(capsys):
+def test_newton_solve_verbose_prints_progress_summary(capsys):
+    # capsys's captured stream isn't a real terminal, so ProgressBar's
+    # in-place '\r' redraws no-op (see test_progress.py for that path) —
+    # this only checks the header + final one-line summary, which print
+    # unconditionally regardless of interactivity.
     def residual_fn(x: np.ndarray) -> np.ndarray:
         return np.array([x[0] - 3.0, 2.0 * x[1] + 4.0])
 
@@ -117,7 +121,6 @@ def test_newton_solve_verbose_prints_iteration_table(capsys):
     out = capsys.readouterr().out
     assert "Newton-Raphson solve: 2 unknowns" in out
     assert "residual norm" in out
-    assert "step norm" in out
     assert "Converged in" in out
 
 
@@ -130,7 +133,7 @@ def test_newton_solve_quiet_by_default_prints_nothing(capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_network_solve_verbose_prints_iteration_table(capsys):
+def test_network_solve_verbose_prints_progress_summary(capsys):
     network = _simple_network()
 
     network.solve(tol=1e-6, max_iter=50, verbose=True)

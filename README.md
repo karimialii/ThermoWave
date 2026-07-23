@@ -600,6 +600,16 @@ section above).
 
 ## Roadmap
 
+- **Fixed, in-place `verbose=True` progress bars — landed.**
+  `thermowave.core.progress.ProgressBar` replaces the old scrolling
+  per-iteration table: `Network.solve()` shows one line that redraws in
+  place for the Newton iteration budget and turns green the moment it
+  converges, and `Network.solve_transient()` shows one line over
+  `t`/`duration` for the whole run instead of a table per timestep (every
+  inner per-step solve during a transient is forced quiet regardless of
+  `verbose`, so it can't scroll). Degrades to a single plain summary line
+  when stdout isn't a real terminal (piped output, logs, `capsys` in
+  tests) rather than spamming `\r`-separated text.
 - **Adaptive time-stepping — landed.** `Network.solve_transient(...,
   adaptive=True)` replaces a fixed `dt` with step-doubling error control
   (`rtol`/`atol`, `dt_min`/`dt_max`, a PI-style step-size controller) — see
@@ -659,51 +669,48 @@ section above).
 
 ### Future development
 
-Genuine open gaps in the current architecture, not just unwritten
-components — each is a real wall a general user hits today, with a pointer
-to where it lives:
+Where I'm taking this next, in roughly the order I plan to tackle it:
 
-- **`Network.connect()` only implements `kind="flow"`**
+- **A first-class connection kind beyond `kind="flow"`**
   (`src/thermowave/core/network.py`, `_SUPPORTED_CONNECTION_KINDS`).
   Mechanical coupling (`Shaft`) and heat coupling (`Convection`/
-  `Conduction`/`Radiation`) each exist only as their own bespoke component,
-  not as a first-class connection kind in the graph API — there's no
-  `network.connect(a, "shaft_out", b, "shaft_in", kind="mechanical")`. A
-  uniform connection API across domains (flow/mechanical/heat/electrical)
-  would let new coupling types plug into the existing graph-traversal and
-  reporting machinery instead of each needing its own component class.
-- **`CharacteristicMap` only reads single-angle turbomachinery maps**
-  (`src/thermowave/maps/characteristic_map.py`) — a variable-geometry
-  compressor/turbine map (multiple vane-angle blocks in one `.cop`/`.tur`
-  file) isn't parseable at all. Real VGV/VGT hardware needs this; it's a
-  file-format gap, not a modeling one — the underlying corrected-flow/PR/eta
-  interpolation already generalizes.
-- **`MultiPassHeatExchanger` is closed over 4 built-in arrangements**
+  `Conduction`/`Radiation`) each work today, but only as their own bespoke
+  component — not as `network.connect(a, "shaft_out", b, "shaft_in",
+  kind="mechanical")`. I want one uniform connection API across
+  flow/mechanical/heat/electrical domains, so a new coupling type can plug
+  into the existing graph-traversal and reporting machinery instead of
+  needing its own component class.
+- **Variable-geometry turbomachinery maps.**
+  `CharacteristicMap` (`src/thermowave/maps/characteristic_map.py`)
+  currently only reads single-angle maps — the corrected-flow/PR/eta
+  interpolation already generalizes, I just haven't written the
+  multi-angle-block file format support yet for real VGV/VGT hardware.
+- **A pluggable correlation hook on `MultiPassHeatExchanger`.**
+  It's closed over 4 built-in arrangements today
   (`src/thermowave/components/multi_pass_heat_exchanger.py`,
-  `_ARRANGEMENTS`) — `counterflow`/`parallel`/`crossflow`/`shell_and_tube`
-  only, enforced by a `ValueError` on anything else. There's no hook for a
-  user's own effectiveness-NTU correlation (plate-fin, finned-tube, a
-  vendor's empirical curve); a `Callable[[NTU, Cr], float]` override
-  alongside the named presets would open this up without disturbing the
+  `_ARRANGEMENTS`: `counterflow`/`parallel`/`crossflow`/`shell_and_tube`).
+  I'm planning to add a `Callable[[NTU, Cr], float]` override alongside
+  those named presets, so a plate-fin/finned-tube/vendor-supplied
+  effectiveness correlation can be dropped in without touching the
   existing four.
-- **One fluid per `Network`** (`Network.fluid` in
-  `src/thermowave/core/network.py`) — a network has a single default
-  working-fluid model, with per-node overrides only reaching as far as
-  components that implement `outlet_fluid()`/`merge_fluids()` (combustion
-  products, real mixing at a `Junction`). A genuinely independent
-  multi-fluid system (e.g. two unrelated streams in a binary/organic-
-  Rankine cascade with no shared enthalpy datum) needs separate `Network`
-  instances today rather than one connected graph.
-- **Recycle/EGR loops are explicitly out of scope** (see "Composition-aware
-  fluid propagation" above) — the solver requires an acyclic flow graph
-  with a fixed boundary `Source`; a stream whose composition depends on
-  itself through a closed loop has no representation yet. This is a bigger
-  lift than the others (it likely needs the solver's own unknown-discovery
-  pass to handle a genuine fixed-point over composition, not just
-  P/h/mdot), so it's listed last.
-- **No CI.** Tests and `ruff`/`mypy` (already in the `dev` extra) aren't
-  wired into a GitHub Actions workflow yet — right now "does it still pass"
-  is only ever checked locally before a push.
-- **`pyproject.toml` has no `[project.urls]`** — the PyPI project page has
-  no link back to this repository, issue tracker, or docs. Small, but worth
-  fixing before the next release rather than accumulating with the rest.
+- **Genuinely independent multi-fluid networks.** Right now a `Network` has
+  one default working-fluid model (`Network.fluid`), with per-node
+  overrides only reaching as far as components that implement
+  `outlet_fluid()`/`merge_fluids()` (combustion products, real mixing at a
+  `Junction`). Modeling two fully unrelated streams with no shared
+  enthalpy datum (e.g. a binary/organic-Rankine cascade) still needs
+  separate `Network` instances rather than one connected graph — I'd like
+  to close that gap.
+- **Recycle/EGR loops.** Explicitly out of scope for now (see
+  "Composition-aware fluid propagation" above) — the solver requires an
+  acyclic flow graph with a fixed boundary `Source`, so a stream whose
+  composition depends on itself through a closed loop has no
+  representation yet. This is the biggest lift on this list (it likely
+  needs the solver's own unknown-discovery pass to handle a genuine
+  fixed-point over composition, not just P/h/mdot), so it's planned last.
+- **CI.** Tests and `ruff`/`mypy` (already in the `dev` extra) aren't wired
+  into a GitHub Actions workflow yet — on my list before the next few
+  releases pile up without it.
+- **`[project.urls]` in `pyproject.toml`.** Small, but the PyPI project
+  page has no link back to this repository yet — fixing that alongside the
+  CI setup.

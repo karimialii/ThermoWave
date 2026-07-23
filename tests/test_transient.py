@@ -1,4 +1,5 @@
 import copy
+import io
 import math
 
 import pytest
@@ -252,3 +253,91 @@ def test_solve_transient_adaptive_calls_step_once_per_accepted_step_with_accepte
     for recorded, actual in zip(recorded_dts, actual_dts):
         assert math.isclose(recorded, actual, rel_tol=1e-9)
     assert math.isclose(sum(recorded_dts), 0.3, rel_tol=1e-9)
+
+
+class _FakeTTY(io.StringIO):
+    """io.StringIO reports isatty() == False; ProgressBar's in-place '\\r'
+    redraws are gated on isatty(), so exercising that path needs a fake
+    terminal that overrides it."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_solve_transient_verbose_does_not_print_a_table_per_timestep(capsys):
+    # The whole point: verbose=True on a multi-step transient must not
+    # print a per-timestep Newton iteration table (that's the scrolling
+    # behavior being replaced) — at most once, for establishing the t=0
+    # equilibrium when initial=None.
+    network, shaft = _build_dynamic_turboshaft(N0=60000.0)
+
+    history = network.solve_transient(
+        duration=0.5, dt=0.05, tol=1e-8, max_iter=400, damping=0.3, verbose=True,
+    )
+
+    out = capsys.readouterr().out
+    assert out.count("Newton-Raphson solve") == 1  # only the t=0 equilibrium solve
+    assert len(history.times) == 11  # 10 steps + t=0, confirms the loop actually ran
+
+
+def test_solve_transient_verbose_with_explicit_initial_prints_no_iteration_table(capsys):
+    # With initial= given, solve_transient() never calls Network.solve()
+    # outside the (always-quiet) per-timestep loop, so there should be zero
+    # "Newton-Raphson solve" lines even though several steps ran.
+    network, shaft = _build_dynamic_turboshaft(N0=60000.0)
+    initial = _off_equilibrium_initial(network, shaft, N0_target=55000.0)
+
+    network.solve_transient(
+        duration=0.2, dt=0.05, initial=initial, tol=1e-8, max_iter=400, damping=0.3,
+        verbose=True,
+    )
+
+    out = capsys.readouterr().out
+    assert "Newton-Raphson solve" not in out
+
+
+def test_solve_transient_verbose_prints_done_summary_on_completion(capsys):
+    network, shaft = _build_dynamic_turboshaft(N0=60000.0)
+
+    history = network.solve_transient(
+        duration=0.3, dt=0.1, tol=1e-8, max_iter=400, damping=0.3, verbose=True,
+    )
+
+    out = capsys.readouterr().out
+    assert "Done:" in out
+    assert "3 steps" in out
+    assert math.isclose(history.times[-1], 0.3, rel_tol=1e-9)
+
+
+def test_solve_transient_quiet_by_default_prints_nothing(capsys):
+    network, shaft = _build_dynamic_turboshaft(N0=60000.0)
+
+    network.solve_transient(duration=0.2, dt=0.05, tol=1e-8, max_iter=400, damping=0.3)
+
+    assert capsys.readouterr().out == ""
+
+
+def test_solve_transient_verbose_interactive_redraws_progress_bar_in_place(monkeypatch):
+    # On a real terminal, verbose=True should redraw one fixed line via '\r'
+    # for every accepted step (never a newline until the run finishes), and
+    # the final line should be colored green. initial= is given explicitly
+    # so the only verbose output is the transient bar's own — no Newton bar
+    # from establishing a t=0 equilibrium mixed in.
+    network, shaft = _build_dynamic_turboshaft(N0=60000.0)
+    initial = _off_equilibrium_initial(network, shaft, N0_target=55000.0)
+    fake_stdout = _FakeTTY()
+    monkeypatch.setattr("sys.stdout", fake_stdout)
+
+    network.solve_transient(
+        duration=0.3, dt=0.1, initial=initial, tol=1e-8, max_iter=400, damping=0.3,
+        verbose=True,
+    )
+
+    out = fake_stdout.getvalue()
+    # One redraw per accepted step (3) plus the final colored finish — all
+    # '\r'-prefixed, never a '\n' until the very end.
+    assert out.count("\r") == 4  # 3 in-loop renders + 1 finish
+    assert out.count("\n") == 1  # only the final newline
+    assert "\033[32m" in out  # green on completion
+    assert "Done:" in out
+    assert "step 3" in out

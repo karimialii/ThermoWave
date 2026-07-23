@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
+from thermowave.core import reporting
 from thermowave.core.exceptions import ConvergenceError
 
 if TYPE_CHECKING:
@@ -166,6 +167,16 @@ def solve_transient(
     error estimate has nothing to compare otherwise) — a network with only
     step()-able components (e.g. a PIDController with no dynamic Shaft/Tank)
     must use adaptive=False.
+
+    verbose: shows one fixed, in-place progress bar over t/duration for the
+    whole run (thermowave.core.progress.ProgressBar — never scrolls, turns
+    green on completion), not a per-timestep iteration table — every inner
+    Network.solve() call the time-marching loop itself makes is forced to
+    verbose=False regardless of this flag, since printing a full Newton
+    iteration table once per timestep is exactly the scrolling behavior this
+    is meant to replace. The one exception is establishing the t=0
+    equilibrium when initial=None: that single Network.solve() does honor
+    verbose, since it happens once, before the transient bar starts.
     """
     full_names = _differential_full_names(network)
     pid_like = [c for c in network.components if hasattr(c, "step") and callable(c.step)]
@@ -196,8 +207,11 @@ def solve_transient(
 
     from thermowave.core.network import NetworkState
 
+    bar = reporting.new_progress_bar() if verbose else None
+    n_steps_taken = 0
+
     def _apply_step(result: "SolveResult", h: float) -> None:
-        nonlocal prev_diff_values, warm_start, t
+        nonlocal prev_diff_values, warm_start, t, n_steps_taken
         steps.append(result)
         warm_start = result
         prev_diff_values = {name: result.params[name] for name in full_names}
@@ -212,10 +226,15 @@ def solve_transient(
                 pid.step(state, h)
         t += h
         times.append(t)
+        n_steps_taken += 1
+        if bar is not None:
+            reporting.render_transient_progress(bar, t, duration, n_steps_taken, h)
 
     def _solve_step(h: float, prev: dict[str, float], seed: "SolveResult") -> "SolveResult":
+        # Always quiet: a per-timestep Newton iteration table is exactly the
+        # scrolling behavior the transient progress bar above replaces.
         return network.solve(
-            tol=tol, max_iter=max_iter, damping=damping, verbose=verbose,
+            tol=tol, max_iter=max_iter, damping=damping, verbose=False,
             dt=h, prev_diff_values=prev, warm_start=seed,
         )
 
@@ -225,8 +244,15 @@ def solve_transient(
     if not adaptive:
         n_steps = max(1, round(duration / dt))
         for _ in range(n_steps):
-            result = _solve_step(dt, prev_diff_values, warm_start)
+            try:
+                result = _solve_step(dt, prev_diff_values, warm_start)
+            except ConvergenceError:
+                if bar is not None:
+                    reporting.finish_transient_progress(bar, n_steps_taken, t, success=False)
+                raise
             _apply_step(result, dt)
+        if bar is not None:
+            reporting.finish_transient_progress(bar, n_steps_taken, t)
         return TransientResult(times, steps, diff_history)
 
     h = dt
@@ -261,13 +287,18 @@ def solve_transient(
             if h_next >= h or (dt_min is not None and h <= dt_min):
                 shrinks = max_step_shrinks  # h can't shrink further; stop retrying
             if shrinks >= max_step_shrinks:
-                raise ConvergenceError(
+                message = (
                     f"solve_transient(adaptive=True) rejected {shrinks} consecutive "
                     f"steps at t={t:.6g} without meeting rtol={rtol:g}/atol={atol:g} "
                     f"(last dt tried: {h:.6g}, last error: {err:.3g}) — the network's "
                     f"dynamics may be stiffer than dt_min allows, or rtol/atol may be "
                     f"tighter than the Newton solve's own tol can support."
                 )
+                if bar is not None:
+                    reporting.finish_transient_progress(bar, n_steps_taken, t, success=False)
+                raise ConvergenceError(message)
             h = h_next
 
+    if bar is not None:
+        reporting.finish_transient_progress(bar, n_steps_taken, t)
     return TransientResult(times, steps, diff_history)
