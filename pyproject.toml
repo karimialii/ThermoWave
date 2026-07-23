@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thermowave"
-version = "0.2.0"
+version = "0.2.1"
 description = "A headless, 1D implicit thermodynamic network solver for steady-state thermal-fluid systems"
 readme = "README.md"
 license = { text = "MIT" }
