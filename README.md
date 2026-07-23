@@ -600,6 +600,11 @@ section above).
 
 ## Roadmap
 
+- **Adaptive time-stepping — landed.** `Network.solve_transient(...,
+  adaptive=True)` replaces a fixed `dt` with step-doubling error control
+  (`rtol`/`atol`, `dt_min`/`dt_max`, a PI-style step-size controller) — see
+  "Transient simulation" above for the full contract. `adaptive=False` (the
+  default) is the original fixed-step behavior, unchanged.
 - **Two-phase / Rankine components — landed.** `SimpleEvaporator`/
   `SimpleCondenser` (single-stream), `Evaporator`/`Condenser` (two-stream),
   `Drum` (transient steam drum), and `Pump`/`SteamTurbine` — all gated on a
@@ -651,3 +656,54 @@ section above).
   relations and why it needs no internal discretization nodes (the
   tube-side reversal is captured analytically, not modeled as a node
   chain).
+
+### Future development
+
+Genuine open gaps in the current architecture, not just unwritten
+components — each is a real wall a general user hits today, with a pointer
+to where it lives:
+
+- **`Network.connect()` only implements `kind="flow"`**
+  (`src/thermowave/core/network.py`, `_SUPPORTED_CONNECTION_KINDS`).
+  Mechanical coupling (`Shaft`) and heat coupling (`Convection`/
+  `Conduction`/`Radiation`) each exist only as their own bespoke component,
+  not as a first-class connection kind in the graph API — there's no
+  `network.connect(a, "shaft_out", b, "shaft_in", kind="mechanical")`. A
+  uniform connection API across domains (flow/mechanical/heat/electrical)
+  would let new coupling types plug into the existing graph-traversal and
+  reporting machinery instead of each needing its own component class.
+- **`CharacteristicMap` only reads single-angle turbomachinery maps**
+  (`src/thermowave/maps/characteristic_map.py`) — a variable-geometry
+  compressor/turbine map (multiple vane-angle blocks in one `.cop`/`.tur`
+  file) isn't parseable at all. Real VGV/VGT hardware needs this; it's a
+  file-format gap, not a modeling one — the underlying corrected-flow/PR/eta
+  interpolation already generalizes.
+- **`MultiPassHeatExchanger` is closed over 4 built-in arrangements**
+  (`src/thermowave/components/multi_pass_heat_exchanger.py`,
+  `_ARRANGEMENTS`) — `counterflow`/`parallel`/`crossflow`/`shell_and_tube`
+  only, enforced by a `ValueError` on anything else. There's no hook for a
+  user's own effectiveness-NTU correlation (plate-fin, finned-tube, a
+  vendor's empirical curve); a `Callable[[NTU, Cr], float]` override
+  alongside the named presets would open this up without disturbing the
+  existing four.
+- **One fluid per `Network`** (`Network.fluid` in
+  `src/thermowave/core/network.py`) — a network has a single default
+  working-fluid model, with per-node overrides only reaching as far as
+  components that implement `outlet_fluid()`/`merge_fluids()` (combustion
+  products, real mixing at a `Junction`). A genuinely independent
+  multi-fluid system (e.g. two unrelated streams in a binary/organic-
+  Rankine cascade with no shared enthalpy datum) needs separate `Network`
+  instances today rather than one connected graph.
+- **Recycle/EGR loops are explicitly out of scope** (see "Composition-aware
+  fluid propagation" above) — the solver requires an acyclic flow graph
+  with a fixed boundary `Source`; a stream whose composition depends on
+  itself through a closed loop has no representation yet. This is a bigger
+  lift than the others (it likely needs the solver's own unknown-discovery
+  pass to handle a genuine fixed-point over composition, not just
+  P/h/mdot), so it's listed last.
+- **No CI.** Tests and `ruff`/`mypy` (already in the `dev` extra) aren't
+  wired into a GitHub Actions workflow yet — right now "does it still pass"
+  is only ever checked locally before a push.
+- **`pyproject.toml` has no `[project.urls]`** — the PyPI project page has
+  no link back to this repository, issue tracker, or docs. Small, but worth
+  fixing before the next release rather than accumulating with the rest.
