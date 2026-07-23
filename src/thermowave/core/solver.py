@@ -84,8 +84,18 @@ def newton_solve(
     clamp_fn: Callable[[np.ndarray], np.ndarray] | None = None,
     step_limit_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
     verbose: bool = False,
+    progress: bool = True,
 ) -> tuple[np.ndarray, int, float]:
     """Damped Newton-Raphson with a finite-difference Jacobian.
+
+    progress: show a fixed, in-place terminal progress bar (see
+    thermowave.core.progress.ProgressBar) — on by default; live redraws only
+    actually appear on a real terminal (a non-tty stream like a pipe/log
+    file/pytest's capsys just gets the one-line final summary), so this is
+    safe to leave on for library/script use. progress=False suppresses all
+    of it, matching the original fully-silent default. verbose only changes
+    how much detail that bar's text carries (iteration/residual/step
+    numbers) — it has no effect when progress=False.
 
     step_limit_fn(x, step) -> step, applied before damping and clamp_fn, caps
     how far a single iteration may move — unlike damping (one scalar factor
@@ -110,8 +120,9 @@ def newton_solve(
         x = clamp_fn(x)
 
     bar = None
-    if verbose:
-        reporting.print_solve_header(len(x), tol, max_iter)
+    if progress:
+        if verbose:
+            reporting.print_solve_header(len(x), tol, max_iter)
         bar = reporting.new_progress_bar()
 
     for iteration in range(1, max_iter + 1):
@@ -119,7 +130,9 @@ def newton_solve(
         residual_norm = float(np.linalg.norm(F))
         if residual_norm < tol:
             if bar is not None:
-                reporting.finish_solve_progress(bar, True, iteration - 1, residual_norm, tol)
+                reporting.finish_solve_progress(
+                    bar, True, iteration - 1, residual_norm, tol, verbose=verbose
+                )
             return x, iteration - 1, residual_norm
 
         J = _finite_difference_jacobian(residual_fn, x, F)
@@ -129,7 +142,9 @@ def newton_solve(
             y = np.linalg.solve(J_scaled, -(r * F))
         except np.linalg.LinAlgError as exc:
             if bar is not None:
-                reporting.finish_solve_progress(bar, False, iteration - 1, residual_norm, tol)
+                reporting.finish_solve_progress(
+                    bar, False, iteration - 1, residual_norm, tol, verbose=verbose
+                )
             raise ConvergenceError(
                 f"Singular Jacobian at iteration {iteration}: {exc}"
             ) from exc
@@ -140,7 +155,8 @@ def newton_solve(
         step = damping * dx
         if bar is not None:
             reporting.render_solve_progress(
-                bar, iteration, max_iter, residual_norm, float(np.linalg.norm(step))
+                bar, iteration, max_iter, residual_norm, float(np.linalg.norm(step)),
+                verbose=verbose,
             )
 
         x = x + step
@@ -151,11 +167,13 @@ def newton_solve(
     residual_norm = float(np.linalg.norm(F))
     if residual_norm < tol:
         if bar is not None:
-            reporting.finish_solve_progress(bar, True, max_iter, residual_norm, tol)
+            reporting.finish_solve_progress(
+                bar, True, max_iter, residual_norm, tol, verbose=verbose
+            )
         return x, max_iter, residual_norm
 
     if bar is not None:
-        reporting.finish_solve_progress(bar, False, max_iter, residual_norm, tol)
+        reporting.finish_solve_progress(bar, False, max_iter, residual_norm, tol, verbose=verbose)
     raise ConvergenceError(
         f"Solver failed to converge after {max_iter} iterations "
         f"(residual norm={residual_norm:.3e}, tol={tol:.3e})"
@@ -233,6 +251,7 @@ class Solver:
         max_iter: int = 100,
         damping: float = 1.0,
         verbose: bool = False,
+        progress: bool = True,
         dt: float | None = None,
         prev_diff_values: dict[str, float] | None = None,
         warm_start: "SolveResult | None" = None,
@@ -562,7 +581,7 @@ class Solver:
         F0 = residual_vector(x0)
         n_equations = len(F0)
 
-        if verbose:
+        if verbose and progress:
             reporting.print_system_summary(n_unknowns, n_equations)
 
         if n_unknowns != n_equations:
@@ -603,6 +622,7 @@ class Solver:
             clamp_fn=clamp,
             step_limit_fn=step_limit,
             verbose=verbose,
+            progress=progress,
         )
         node_P, node_h, node_mdot, params = unpack(x_sol)
         final_state = NetworkState(

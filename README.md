@@ -600,14 +600,18 @@ section above).
 
 ## Roadmap
 
-- **Fixed, in-place `verbose=True` progress bars — landed.**
+- **Fixed, in-place progress bars, on by default — landed.**
   `thermowave.core.progress.ProgressBar` replaces the old scrolling
   per-iteration table: `Network.solve()` shows one line that redraws in
   place for the Newton iteration budget and turns green the moment it
   converges, and `Network.solve_transient()` shows one line over
   `t`/`duration` for the whole run instead of a table per timestep (every
-  inner per-step solve during a transient is forced quiet regardless of
-  `verbose`, so it can't scroll). Degrades to a single plain summary line
+  inner per-step solve during a transient is forced fully silent
+  regardless of these flags, so it can't scroll). `progress=True` is the
+  default on both — no `verbose` needed just to see it — and prints a
+  terse one-line summary; `verbose=True` adds iteration/residual/step
+  detail to that same bar's text. `progress=False` is full silence,
+  regardless of `verbose`. Degrades to a single plain summary line
   when stdout isn't a real terminal (piped output, logs, `capsys` in
   tests) rather than spamming `\r`-separated text.
 - **Adaptive time-stepping — landed.** `Network.solve_transient(...,

@@ -30,37 +30,48 @@ def new_progress_bar() -> ProgressBar:
 
 
 def render_solve_progress(
-    bar: ProgressBar, iteration: int, max_iter: int, residual_norm: float, step_norm: float
+    bar: ProgressBar,
+    iteration: int,
+    max_iter: int,
+    residual_norm: float,
+    step_norm: float,
+    verbose: bool = False,
 ) -> None:
-    bar.render(
-        iteration / max_iter,
-        f"iter {iteration}/{max_iter}  residual={residual_norm:.3e}  step={step_norm:.3e}",
-    )
+    text = f"iter {iteration}/{max_iter}"
+    if verbose:
+        text += f"  residual={residual_norm:.3e}  step={step_norm:.3e}"
+    bar.render(iteration / max_iter, text)
 
 
 def finish_solve_progress(
-    bar: ProgressBar, converged: bool, iterations: int, residual_norm: float, tol: float
+    bar: ProgressBar,
+    converged: bool,
+    iterations: int,
+    residual_norm: float,
+    tol: float,
+    verbose: bool = False,
 ) -> None:
     plural = "" if iterations == 1 else "s"
     if converged:
-        bar.finish(
-            f"Converged in {iterations} iteration{plural} "
-            f"(residual norm = {residual_norm:.4e} < tol = {tol:.2e})",
-            success=True,
-        )
+        text = f"Converged in {iterations} iteration{plural}"
+        if verbose:
+            text += f" (residual norm = {residual_norm:.4e} < tol = {tol:.2e})"
+        bar.finish(text, success=True)
     else:
-        bar.finish(
-            f"Failed to converge after {iterations} iterations "
-            f"(residual norm = {residual_norm:.4e}, tol = {tol:.2e})",
-            success=False,
-        )
+        text = f"Failed to converge after {iterations} iterations"
+        if verbose:
+            text += f" (residual norm = {residual_norm:.4e}, tol = {tol:.2e})"
+        bar.finish(text, success=False)
 
 
 def render_transient_progress(
-    bar: ProgressBar, t: float, duration: float, step: int, dt: float
+    bar: ProgressBar, t: float, duration: float, step: int, dt: float, verbose: bool = False
 ) -> None:
     fraction = t / duration if duration > 0 else 1.0
-    bar.render(fraction, f"t={t:.4g}/{duration:.4g}s  step {step}  dt={dt:.4g}s")
+    text = f"t={t:.4g}/{duration:.4g}s"
+    if verbose:
+        text += f"  step {step}  dt={dt:.4g}s"
+    bar.render(fraction, text)
 
 
 def finish_transient_progress(

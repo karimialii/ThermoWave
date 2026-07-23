@@ -90,6 +90,7 @@ def solve_transient(
     max_iter: int = 100,
     damping: float = 1.0,
     verbose: bool = False,
+    progress: bool = True,
     adaptive: bool = False,
     rtol: float = 1e-3,
     atol: float = 1e-6,
@@ -168,15 +169,18 @@ def solve_transient(
     step()-able components (e.g. a PIDController with no dynamic Shaft/Tank)
     must use adaptive=False.
 
-    verbose: shows one fixed, in-place progress bar over t/duration for the
+    progress: shows one fixed, in-place progress bar over t/duration for the
     whole run (thermowave.core.progress.ProgressBar — never scrolls, turns
-    green on completion), not a per-timestep iteration table — every inner
-    Network.solve() call the time-marching loop itself makes is forced to
-    verbose=False regardless of this flag, since printing a full Newton
-    iteration table once per timestep is exactly the scrolling behavior this
-    is meant to replace. The one exception is establishing the t=0
-    equilibrium when initial=None: that single Network.solve() does honor
-    verbose, since it happens once, before the transient bar starts.
+    green on completion) — on by default, same as Network.solve(). verbose
+    adds step count/dt detail to that bar's text; it has no effect when
+    progress=False. Either way, this is never a per-timestep iteration
+    table: every inner Network.solve() call the time-marching loop itself
+    makes is forced to progress=False regardless of these flags, since
+    showing a bar (let alone a full Newton iteration table) once per
+    timestep is exactly the scrolling behavior this is meant to replace.
+    The one exception is establishing the t=0 equilibrium when initial=None:
+    that single Network.solve() does honor progress/verbose, since it
+    happens once, before the transient bar starts.
     """
     full_names = _differential_full_names(network)
     pid_like = [c for c in network.components if hasattr(c, "step") and callable(c.step)]
@@ -197,7 +201,9 @@ def solve_transient(
         )
 
     if initial is None:
-        initial = network.solve(tol=tol, max_iter=max_iter, damping=damping, verbose=verbose)
+        initial = network.solve(
+            tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
+        )
 
     prev_diff_values = {name: initial.params[name] for name in full_names}
 
@@ -207,7 +213,7 @@ def solve_transient(
 
     from thermowave.core.network import NetworkState
 
-    bar = reporting.new_progress_bar() if verbose else None
+    bar = reporting.new_progress_bar() if progress else None
     n_steps_taken = 0
 
     def _apply_step(result: "SolveResult", h: float) -> None:
@@ -228,13 +234,14 @@ def solve_transient(
         times.append(t)
         n_steps_taken += 1
         if bar is not None:
-            reporting.render_transient_progress(bar, t, duration, n_steps_taken, h)
+            reporting.render_transient_progress(bar, t, duration, n_steps_taken, h, verbose=verbose)
 
     def _solve_step(h: float, prev: dict[str, float], seed: "SolveResult") -> "SolveResult":
-        # Always quiet: a per-timestep Newton iteration table is exactly the
-        # scrolling behavior the transient progress bar above replaces.
+        # Always fully silent: a progress bar (let alone a Newton iteration
+        # table) once per timestep is exactly the scrolling behavior the
+        # single transient progress bar above replaces.
         return network.solve(
-            tol=tol, max_iter=max_iter, damping=damping, verbose=False,
+            tol=tol, max_iter=max_iter, damping=damping, verbose=False, progress=False,
             dt=h, prev_diff_values=prev, warm_start=seed,
         )
 

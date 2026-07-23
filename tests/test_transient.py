@@ -309,10 +309,39 @@ def test_solve_transient_verbose_prints_done_summary_on_completion(capsys):
     assert math.isclose(history.times[-1], 0.3, rel_tol=1e-9)
 
 
-def test_solve_transient_quiet_by_default_prints_nothing(capsys):
+def test_solve_transient_progress_defaults_on_and_prints_terse_summary(capsys):
+    # progress=True is the default (not just verbose=True): even a plain
+    # call prints a terse one-line-per-phase summary (the t=0 equilibrium
+    # solve, then the transient run itself) — just without the
+    # step/dt/residual detail verbose=True would add.
     network, shaft = _build_dynamic_turboshaft(N0=60000.0)
 
     network.solve_transient(duration=0.2, dt=0.05, tol=1e-8, max_iter=400, damping=0.3)
+
+    out = capsys.readouterr().out
+    assert "Converged in" in out  # the t=0 equilibrium solve
+    assert "Done:" in out  # the transient run itself
+    assert "dt=" not in out  # terse: no verbose per-step detail
+    assert out.count("\n") == 2
+
+
+def test_solve_transient_progress_false_prints_nothing(capsys):
+    network, shaft = _build_dynamic_turboshaft(N0=60000.0)
+
+    network.solve_transient(
+        duration=0.2, dt=0.05, tol=1e-8, max_iter=400, damping=0.3, progress=False,
+    )
+
+    assert capsys.readouterr().out == ""
+
+
+def test_solve_transient_progress_false_ignores_verbose(capsys):
+    network, shaft = _build_dynamic_turboshaft(N0=60000.0)
+
+    network.solve_transient(
+        duration=0.2, dt=0.05, tol=1e-8, max_iter=400, damping=0.3,
+        progress=False, verbose=True,
+    )
 
     assert capsys.readouterr().out == ""
 

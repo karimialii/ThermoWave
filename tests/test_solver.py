@@ -124,11 +124,37 @@ def test_newton_solve_verbose_prints_progress_summary(capsys):
     assert "Converged in" in out
 
 
-def test_newton_solve_quiet_by_default_prints_nothing(capsys):
+def test_newton_solve_progress_defaults_on_and_prints_terse_summary(capsys):
+    # progress=True is the default (not just verbose=True) — even a plain
+    # call should print one final summary line, just without the
+    # iteration/residual detail verbose=True would add.
     def residual_fn(x: np.ndarray) -> np.ndarray:
         return np.array([x[0] - 3.0])
 
     newton_solve(residual_fn, np.array([0.0]), tol=1e-9)
+
+    out = capsys.readouterr().out
+    assert "Converged in" in out
+    assert "residual norm" not in out  # terse: no verbose detail
+    assert out.count("\n") == 1
+
+
+def test_newton_solve_progress_false_prints_nothing(capsys):
+    def residual_fn(x: np.ndarray) -> np.ndarray:
+        return np.array([x[0] - 3.0])
+
+    newton_solve(residual_fn, np.array([0.0]), tol=1e-9, progress=False)
+
+    assert capsys.readouterr().out == ""
+
+
+def test_newton_solve_progress_false_ignores_verbose(capsys):
+    # verbose only controls how much detail the bar carries; it shouldn't
+    # resurrect any output when progress=False turns the bar off entirely.
+    def residual_fn(x: np.ndarray) -> np.ndarray:
+        return np.array([x[0] - 3.0])
+
+    newton_solve(residual_fn, np.array([0.0]), tol=1e-9, progress=False, verbose=True)
 
     assert capsys.readouterr().out == ""
 

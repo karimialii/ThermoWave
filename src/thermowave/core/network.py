@@ -319,6 +319,7 @@ class Network:
         max_iter: int = 100,
         damping: float = 1.0,
         verbose: bool = False,
+        progress: bool = True,
         dt: float | None = None,
         prev_diff_values: dict[str, float] | None = None,
         warm_start: "SolveResult | None" = None,
@@ -328,12 +329,20 @@ class Network:
         callers should leave both at their defaults. warm_start: see
         Solver.solve()'s docstring — an earlier SolveResult (this network's
         or a related one's) to seed x0 from instead of the flat/propagated
-        default guess, for staged/continuation solving."""
+        default guess, for staged/continuation solving.
+
+        progress: a fixed, in-place terminal progress bar for the Newton
+        iteration budget — on by default (thermowave.core.progress
+        .ProgressBar only actually redraws in place on a real terminal, so
+        this is safe to leave on in scripts/logs/tests: it just prints one
+        final summary line there instead). Set False for total silence.
+        verbose adds iteration/residual/step detail to that bar's text; it
+        has no effect when progress=False."""
         self.validate_topology()
         from thermowave.core.solver import Solver
 
         return Solver(self).solve(
-            tol=tol, max_iter=max_iter, damping=damping, verbose=verbose,
+            tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
             dt=dt, prev_diff_values=prev_diff_values, warm_start=warm_start,
         )
 
@@ -346,6 +355,7 @@ class Network:
         max_iter: int = 100,
         damping: float = 1.0,
         verbose: bool = False,
+        progress: bool = True,
         adaptive: bool = False,
         rtol: float = 1e-3,
         atol: float = 1e-6,
@@ -366,7 +376,7 @@ class Network:
 
         return solve_transient(
             self, duration, dt, initial=initial,
-            tol=tol, max_iter=max_iter, damping=damping, verbose=verbose,
+            tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
             adaptive=adaptive, rtol=rtol, atol=atol, dt_min=dt_min, dt_max=dt_max,
             safety=safety, growth_limit=growth_limit, shrink_limit=shrink_limit,
             max_step_shrinks=max_step_shrinks,
