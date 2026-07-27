@@ -271,3 +271,56 @@ def test_check_wiring_flags_a_static_shafts_unclosed_reference_speed():
     problems = network.check_wiring()
     assert any("comp.N" in p and "nothing closes it" in p for p in problems)
     assert not any("turb.N" in p for p in problems)  # tied to comp, so closed
+
+
+def test_convergence_failure_reports_the_system_size():
+    # A bare "Singular Jacobian at iteration 12" says the linear algebra
+    # broke, not which part of the model broke it. The system size and any
+    # wiring findings are only known inside the solve, so they get attached
+    # there rather than needing a second run with verbose=True.
+    from thermowave.core.exceptions import ConvergenceError
+
+    network, comp, sensor = _free_speed_compressor_network()
+    network.add_component(
+        Setpoint(
+            name="sp", component=comp, free_param="N",
+            target_metric="PR [-]", value=500.0,  # unreachable on this map
+        )
+    )
+
+    with pytest.raises(ConvergenceError) as excinfo:
+        network.solve(tol=1e-12, max_iter=3, damping=0.1, progress=False)
+
+    message = str(excinfo.value)
+    assert "unknown(s)" in message and "equation(s)" in message
+    assert "steady state" in message
+    assert "warm_start" in message  # points at the usual fix
+
+
+def test_convergence_failure_surfaces_wiring_problems_when_there_are_any():
+    # An unclosed free parameter usually shows up as a non-square system,
+    # but if the counts happen to balance it can reach the Newton solve and
+    # fail there instead -- so the wiring findings ride along either way.
+    from thermowave.core.exceptions import ConvergenceError
+
+    network, comp, sensor = _free_speed_compressor_network()
+    network.add_component(
+        Setpoint(name="sp", component=comp, free_param="N",
+                 target_metric="PR [-]", value=500.0)
+    )
+    network.remove_component(sensor)  # harmless here, keeps the system square
+
+    with pytest.raises(ConvergenceError) as excinfo:
+        network.solve(tol=1e-12, max_iter=3, damping=0.1, progress=False)
+    assert "System:" in str(excinfo.value)
+
+
+def test_successful_solve_is_unaffected_by_the_failure_diagnostics():
+    network, comp, _ = _free_speed_compressor_network()
+    network.add_component(
+        Setpoint(name="sp", component=comp, free_param="N", target_metric="PR [-]", value=2.5)
+    )
+
+    result = network.solve(tol=1e-8, max_iter=300, damping=0.5, progress=False)
+
+    assert result.converged

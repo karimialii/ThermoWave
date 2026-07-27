@@ -180,6 +180,51 @@ def newton_solve(
     )
 
 
+def _failure_context(
+    message: str,
+    network: "Network",
+    n_unknowns: int,
+    n_equations: int,
+    dt: float | None,
+) -> str:
+    """A failed solve's message, plus what the solver knows about the
+    network that produced it.
+
+    A ConvergenceError on its own ("Singular Jacobian at iteration 12")
+    gives a caller nothing to act on: it says the linear algebra broke, not
+    which part of their model broke it. The system size and any
+    Network.check_wiring() findings are both cheap and only meaningful
+    here, so they get attached at the point of failure rather than left for
+    the caller to go find with verbose=True and a second run.
+    """
+    lines = [
+        message,
+        "",
+        f"System: {n_unknowns} unknown(s), {n_equations} equation(s)"
+        + (f", backward-Euler step dt={dt:g}" if dt is not None else ", steady state"),
+    ]
+
+    problems = network.check_wiring()
+    if problems:
+        lines += ["", "Wiring problems found:"]
+        lines += [f"  - {p}" for p in problems]
+
+    lines += [
+        "",
+        "A square system that still won't converge is usually a starting-guess "
+        "problem rather than a wiring one. Things that help, roughly in order:",
+        "  - warm_start=<an earlier SolveResult> from an easier version of this "
+        "network (a lower load, a fixed value where this one solves for it), then "
+        "step toward the point you actually want -- continuation.",
+        "  - a lower damping= (0.1-0.3) so early iterations can't overshoot off "
+        "the edge of a component's map.",
+        "  - fixing a free parameter at a plausible value to check the rest of "
+        "the network converges at all, then freeing it again with that result as "
+        "warm_start.",
+    ]
+    return "\n".join(lines)
+
+
 class SolveResult:
     """Outcome of a Network.solve() call."""
 
@@ -638,17 +683,27 @@ class Solver:
                 node_fluid=node_fluid,
             )
 
-        x_sol, iterations, residual_norm = newton_solve(
-            residual_vector,
-            x0,
-            tol=tol,
-            max_iter=max_iter,
-            damping=damping,
-            clamp_fn=clamp,
-            step_limit_fn=step_limit,
-            verbose=verbose,
-            progress=progress,
-        )
+        try:
+            x_sol, iterations, residual_norm = newton_solve(
+                residual_vector,
+                x0,
+                tol=tol,
+                max_iter=max_iter,
+                damping=damping,
+                clamp_fn=clamp,
+                step_limit_fn=step_limit,
+                verbose=verbose,
+                progress=progress,
+            )
+        except ConvergenceError as exc:
+            # A bare "Singular Jacobian at iteration 12" says nothing about
+            # the network that produced it. Attach the system size and any
+            # wiring findings here, where they're actually known -- failure
+            # is exactly when that context is worth having, and it costs
+            # nothing on the path where the solve works.
+            raise ConvergenceError(
+                _failure_context(str(exc), network, n_unknowns, n_equations, dt)
+            ) from exc
         node_P, node_h, node_mdot, params = unpack(x_sol)
         final_state = NetworkState(
             fluid=fluid, node_P=node_P, node_h=node_h, node_mdot=node_mdot, params=params,
