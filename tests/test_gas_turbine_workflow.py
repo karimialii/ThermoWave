@@ -10,19 +10,22 @@ Uses the generic maps shipped with the repo, not any particular machine's.
 
 import math
 
-from thermowave.components.compressor import Compressor
-from thermowave.components.controller import Controller
-from thermowave.components.heat_transfer import Convection, ThermalMass
-from thermowave.components.pid_controller import PIDController
-from thermowave.components.pipe import Pipe
-from thermowave.components.sensor import Sensor
-from thermowave.components.shaft import Shaft
-from thermowave.components.shaft_load import ShaftLoad
-from thermowave.components.sink import Sink
-from thermowave.components.source import Source
-from thermowave.components.turbine import Turbine
-from thermowave.core.network import Network
-from thermowave.fluids.ideal_gas import IdealGasFluid
+from thermowave.components import (
+    Compressor,
+    Controller,
+    Convection,
+    PIDController,
+    Pipe,
+    Sensor,
+    Shaft,
+    ShaftLoad,
+    Sink,
+    Source,
+    ThermalMass,
+    Turbine,
+)
+from thermowave.core import Network
+from thermowave.fluids import IdealGasFluid
 
 AIR = IdealGasFluid(name="air", R=287.05, cp=1005.0)
 GAMMA = 1005.0 / (1005.0 - 287.05)

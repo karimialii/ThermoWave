@@ -27,8 +27,8 @@ guide can't drift from working code.
 ## 1. Create the network
 
 ```python
-from thermowave.core.network import Network
-from thermowave.fluids.cantera_fluid import CanteraFluid
+from thermowave.core import Network
+from thermowave.fluids import CanteraFluid
 
 air = CanteraFluid(name="air", mechanism="gri30.yaml", composition="O2:0.21,N2:0.79")
 network = Network(fluid=air)
@@ -41,13 +41,9 @@ downstream (see *Composition-aware fluid propagation* in the README). An
 ## 2. Flow-path components
 
 ```python
-from thermowave.components.combustor import Combustor
-from thermowave.components.compressor import Compressor
-from thermowave.components.sensor import Sensor
-from thermowave.components.simple_heat_exchanger import SimpleHeatExchanger
-from thermowave.components.sink import Sink
-from thermowave.components.source import Source
-from thermowave.components.turbine import Turbine
+from thermowave.components import (
+    Combustor, Compressor, Sensor, SimpleHeatExchanger, Sink, Source, Turbine,
+)
 
 GAMMA = 1.4
 P_AMB, T_AMB = 101325.0, 288.15
@@ -74,8 +70,7 @@ speed-tied one, so build the turbomachines with `N=None` first.
 ## 3. Shaft and load
 
 ```python
-from thermowave.components.shaft import Shaft
-from thermowave.components.shaft_load import ShaftLoad
+from thermowave.components import Shaft, ShaftLoad
 
 ETA_GEN, ETA_MECH = 0.96, 0.98
 
@@ -102,7 +97,7 @@ See the mechanical-loss trap below for why `efficiency` is on the load and
 ## 4a. Thermal components
 
 ```python
-from thermowave.components.heat_transfer import Conduction, Convection, ThermalMass
+from thermowave.components import Conduction, Convection, ThermalMass
 
 comp_casing = ThermalMass(name="comp_casing", thermal_capacitance=2000.0, T0=T_AMB)
 turb_casing = ThermalMass(name="turb_casing", thermal_capacitance=2000.0, T0=T_AMB)
@@ -168,7 +163,7 @@ A dynamic shaft closes its own speed (`state_derivative() == 0` at steady
 state), so the remaining unknown is fuel:
 
 ```python
-from thermowave.components.controller import Controller
+from thermowave.components import Controller
 
 ctrl_tot = Controller(
     name="ctrl_tot", sensor=tot, quantity="T [K]",
@@ -190,7 +185,7 @@ turbomachinery network.
 ## 6. Swap in the PID controllers
 
 ```python
-from thermowave.components.pid_controller import PIDController
+from thermowave.components import PIDController
 
 pid_fuel = PIDController(
     name="pid_fuel", sensor=tot, quantity="T [K]",
@@ -227,7 +222,7 @@ steady solve ran on, those states line up by name automatically.
 For a load profile, drive the load with a `Schedule`:
 
 ```python
-from thermowave.components.schedule import Schedule
+from thermowave.components import Schedule
 
 network.add_component(Schedule(
     name="load_profile", target=load, attr="power",
