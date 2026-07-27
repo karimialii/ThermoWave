@@ -169,6 +169,43 @@ def _parse_row(line: str, fact: float) -> list[float]:
 
 
 def _interpolate(speed_lines: list[_SpeedLine], A: float, B: float) -> float:
+    """Interpolate between iso-speed curves at corrected speed A, mass flow B.
+
+    Between two bracketing speed lines, each line is evaluated at the same
+    FRACTION of its own maximum (choke) mass flow rather than at the same raw
+    corrected mass flow B, then the two results are blended by speed.
+
+    Why this matters, concretely. Every speed line in these maps ends in a
+    near-vertical choke leg: its last few tabulated mass flows are spaced ~1e-3
+    apart while the pressure ratio collapses. Each line chokes at its own mass
+    flow, and those differ a lot between lines — in the T100 compressor map the
+    pair bracketing 60,000 rev/min choke at B = 9.978 and B = 12.308, 23% apart.
+    Evaluating both at the same raw B therefore puts the lower line hundreds of
+    times further along its curve than the upper one: at B = 9.98 the lower line
+    is exactly on its choke knee (PR falling 2.744 -> 2.152 over dB = 0.003,
+    roughly 680x steeper than its normal leg) while the upper line is still on
+    its gentle leg. The blend inherits that collapse, so the interpolated
+    characteristic has a spurious near-discontinuity at the LOWER line's choke
+    flow, at every speed in between — a mass flow where the real machine at the
+    higher speed is nowhere near choke.
+
+    In the T100 model that artifact froze air mass flow at 0.6044 kg/s across
+    59,500-61,000 rev/min while speed rose 1,500 rev/min, produced two spurious
+    folds in the steady speed-vs-power curve (two valid steady states at 65 kW,
+    3,400 rev/min apart), and made a load-following transient across that band
+    diverge. Aligning on fraction-of-choke removes all of it: the folds go away,
+    mass flow becomes smooth and monotone, and the modelled speed-vs-power slope
+    goes from 96 rev/min per kW on that spurious upper branch to 249, against
+    ~212 measured on the rig.
+
+    This is the same normalisation as the beta-line (curve-parameter) map
+    representation used by GasTurb/NPSS/PROOSIS, reduced to the minimum needed
+    here: a shared 0..1 coordinate along each curve so corresponding points on
+    neighbouring speed lines are blended with each other.
+
+    Outside the map's speed range (and for a single-line map) the nearest line is
+    used directly at the raw B, unchanged — there is no second line to align to.
+    """
     if not speed_lines:
         raise ValueError("Map has no speed lines to interpolate")
 
@@ -179,9 +216,18 @@ def _interpolate(speed_lines: list[_SpeedLine], A: float, B: float) -> float:
 
     for lower, upper in zip(speed_lines, speed_lines[1:]):
         if lower.speed <= A <= upper.speed:
-            y_lower = _interpolate_1d(lower, B)
-            y_upper = _interpolate_1d(upper, B)
             weight = (A - lower.speed) / (upper.speed - lower.speed)
+            b_lower, b_upper = lower.mass_flow[-1], upper.mass_flow[-1]
+            b_choke = b_lower + weight * (b_upper - b_lower)
+            # A degenerate line (single point, or a zero choke flow) has no
+            # scale to normalise against; fall back to the raw-B blend.
+            if b_choke > 0.0 and b_lower > 0.0 and b_upper > 0.0:
+                fraction = B / b_choke
+                y_lower = _interpolate_1d(lower, fraction * b_lower)
+                y_upper = _interpolate_1d(upper, fraction * b_upper)
+            else:
+                y_lower = _interpolate_1d(lower, B)
+                y_upper = _interpolate_1d(upper, B)
             return y_lower + weight * (y_upper - y_lower)
 
     raise AssertionError("unreachable: A within the map's overall speed range")
