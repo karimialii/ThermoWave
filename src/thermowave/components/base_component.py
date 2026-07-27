@@ -80,6 +80,25 @@ class BaseComponent(ABC):
         """
         return self.free_parameters()
 
+    def closes_parameters(self) -> list[str]:
+        """Fully-qualified free parameters ("component.param") this component
+        supplies a closing residual for — what Network.check_wiring() reads
+        to tell an unclosed unknown from a properly-driven one.
+
+        A free parameter needs exactly one equation pinning it, but the
+        component supplying that equation is rarely the one that owns it: a
+        Setpoint/Controller/PIDController pins its target's parameter, and a
+        Shaft pins its speed-tied members' speeds through the speed-tie
+        residuals. Declaring it here is what lets a wiring check name the
+        parameter that's loose (or the two components fighting over one)
+        instead of only reporting that the totals don't add up.
+
+        Purely diagnostic — the solver never reads this, it just counts
+        residuals. Default: none, which is right for any component whose
+        residuals only close its own physics.
+        """
+        return []
+
     def differential_parameters(self) -> dict[str, float]:
         """param_name -> initial value, for scalar state this component
         integrates over time in Network.solve_transient() (e.g. a dynamic

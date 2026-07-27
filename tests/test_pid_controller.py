@@ -116,7 +116,7 @@ def test_pid_first_step_has_no_derivative_term():
     pid, comp, sensor = _make_pid(Kp=0.0, Ki=0.0, Kd=5.0)
     state = _temp_state(AIR, "s1.tap", P=300000.0, T=440.0)  # error = -20
     pid.step(state, dt=0.1)
-    assert math.isclose(pid.output, pid._bias, abs_tol=1e-9)
+    assert math.isclose(pid.output, pid.bias, abs_tol=1e-9)
 
 
 def test_pid_report_metrics_reflects_setpoint_measured_error_and_output():
@@ -161,3 +161,70 @@ def test_pid_controller_drives_compressor_outlet_temperature_over_transient():
     assert T_start > target_T  # starts hot (N0 too high for the target)
     assert abs(T_end - target_T) < abs(T_start - target_T)  # error shrank
     assert abs(T_end - target_T) < 2.0  # nearly settled after 8 s
+
+
+def test_pid_feedforward_replaces_the_constant_bias_each_step():
+    # The bias a PID trims around can move with the plant instead of being
+    # pinned to whatever it was at t=0 -- e.g. fuel biased from commanded
+    # load, so the integral term never has to hunt across the whole
+    # actuator range to find the operating point at all.
+    moving = {"value": 60000.0}
+    pid, comp, sensor = _make_pid(
+        Kp=0.0, Ki=0.0, Kd=0.0, feedforward=lambda state: moving["value"]
+    )
+    state = _temp_state(AIR, "s1.tap", P=300000.0, T=420.0)  # error = 0
+
+    pid.step(state, dt=1.0)
+    assert math.isclose(pid.output, 60000.0, rel_tol=1e-9)
+
+    moving["value"] = 55000.0
+    pid.step(state, dt=1.0)
+    assert math.isclose(pid.output, 55000.0, rel_tol=1e-9)
+
+
+def test_pid_feedforward_is_added_to_the_pid_terms_not_instead_of_them():
+    pid, comp, sensor = _make_pid(Kp=2.0, Ki=0.0, Kd=0.0, feedforward=lambda state: 50000.0)
+    state = _temp_state(AIR, "s1.tap", P=300000.0, T=430.0)  # error = -10
+
+    pid.step(state, dt=1.0)
+
+    assert math.isclose(pid.output, 50000.0 + 2.0 * -10.0, rel_tol=1e-9)
+
+
+def test_pid_bias_is_public_so_a_schedule_can_drive_it():
+    pid, comp, sensor = _make_pid(Kp=0.0, Ki=0.0, Kd=0.0, output0=60000.0)
+    state = _temp_state(AIR, "s1.tap", P=300000.0, T=420.0)  # error = 0
+
+    pid.bias = 58000.0
+    pid.step(state, dt=1.0)
+
+    assert math.isclose(pid.output, 58000.0, rel_tol=1e-9)
+
+
+def test_pid_reset_clears_integral_windup_and_previous_error():
+    # A PIDController carries this state on the instance, so reusing one
+    # across two solve_transient() runs would otherwise start the second
+    # with the first's wound-up integral.
+    pid, comp, sensor = _make_pid(Kp=0.0, Ki=1000.0, Kd=0.0, output0=60000.0)
+    state = _temp_state(AIR, "s1.tap", P=300000.0, T=430.0)  # error = -10
+    pid.step(state, dt=1.0)
+    assert not math.isclose(pid.output, 60000.0, rel_tol=1e-9)  # integral moved it
+
+    pid.reset()
+
+    assert pid.output == 60000.0
+    assert pid.bias == 60000.0
+    assert pid._integral == 0.0
+    assert pid._prev_error is None
+    # And a fresh step behaves like the very first one again.
+    pid.step(state, dt=1.0)
+    assert math.isclose(pid.output, 60000.0 + 1000.0 * -10.0, rel_tol=1e-9)
+
+
+def test_pid_reset_can_reseed_the_operating_point():
+    pid, comp, sensor = _make_pid(Kp=0.0, Ki=0.0, Kd=0.0, output0=60000.0)
+
+    pid.reset(output0=52000.0)
+
+    assert pid.output == 52000.0
+    assert pid.bias == 52000.0

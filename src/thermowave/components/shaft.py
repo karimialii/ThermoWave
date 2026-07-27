@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
@@ -124,6 +125,17 @@ class Shaft(BaseComponent):
                 f"Shaft {name!r} has dynamic=True, which integrates its own speed from "
                 f"net torque and inertia; inertia={inertia} must be > 0."
             )
+        if dynamic and efficiency != 1.0:
+            warnings.warn(
+                f"Shaft {name!r} sets efficiency={efficiency} with dynamic=True, where it "
+                f"has almost no effect: efficiency scales the *net* shaft power, and the "
+                f"steady equilibrium a dynamic shaft settles at is exactly net == 0, so "
+                f"the factor cancels and the mechanical loss silently disappears. Put it "
+                f"on the load instead — ShaftLoad(efficiency=eta_gen * eta_mech) with "
+                f"Shaft(efficiency=1.0) — so the shaft-side draw becomes "
+                f"P_elec / (eta_gen * eta_mech) and the loss is actually carried.",
+                stacklevel=2,
+            )
 
         self.name = name
         self.components = components
@@ -138,6 +150,18 @@ class Shaft(BaseComponent):
 
     def ports(self) -> dict[str, str]:
         return {}
+
+    def closes_parameters(self) -> list[str]:
+        """The speeds this shaft's speed-tie residuals pin down.
+
+        dynamic=True owns its own speed as differential state and ties every
+        speed-tied member to it, so all of them are closed here. dynamic=False
+        ties followers to components[0]'s speed instead, which leaves that
+        reference speed itself for something external (a Setpoint/Controller)
+        to close — so it is deliberately absent from this list.
+        """
+        tied = self._speed_tied if self.dynamic else self._speed_tied[1:]
+        return [f"{component.name}.{self.free_param}" for component in tied]
 
     def report_category(self) -> str:
         return "shaft"

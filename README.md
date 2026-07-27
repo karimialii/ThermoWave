@@ -45,6 +45,15 @@ pip install -e ".[cantera]"    # equilibrium-chemistry Combustor + CanteraFluid
 pip install -e ".[full]"       # everything, including dev/test tooling
 ```
 
+## Guides
+
+- [Building a gas-turbine model](docs/building-a-gas-turbine-model.md) — a
+  single-shaft recuperated microturbine end to end: components, thermal
+  network, steady solve, swapping the steady controllers for PIDs, and the
+  transient run seeded from steady. Includes the traps that cost real
+  debugging time (where mechanical loss actually belongs, why more fuel can
+  *lower* turbine outlet temperature, and the no-equilibrium fuel cliff).
+
 ## Architecture
 
 ### Fluids
@@ -600,6 +609,26 @@ section above).
 
 ## Roadmap
 
+- **A clean end-to-end build workflow — landed.** Assembling a gas turbine used
+  to need a dozen raw attribute assignments with hand-picked signs, and there
+  was no way to change a network once solved. Now:
+  `Network.add_heat_path(path)` wires a `Convection`/`Conduction`/`Radiation`
+  into both of its endpoints in one call, deriving each sign from which
+  endpoint it is and registering any `ThermalMass` it touches (previously a
+  forgotten `heat_sources.append` gave a singular Jacobian, and a forgotten
+  `add_component` a bare `KeyError`); a flow component can now carry several
+  heat paths instead of exactly one. `Network.remove_component()` /
+  `replace_component()` make the steady→transient handoff expressible —
+  swapping a steady-state `Controller` for a transient `PIDController` on the
+  same unknown. `Network.check_wiring()` names the free parameter nothing
+  closes, or the two components fighting over one, and is appended to the
+  solver's non-square error (backed by a new `BaseComponent.closes_parameters()`
+  hook, so a `Shaft`'s speed ties count as closing too). `PIDController` gains
+  a `feedforward=` callable, a public `bias`, and `reset()`. `SolveResult.state()`
+  replaces the `NetworkState` boilerplate every caller was rebuilding by hand.
+  `Shaft` now warns when `dynamic=True` is given a non-unity `efficiency`,
+  which silently cancels at equilibrium. See
+  [the gas-turbine guide](docs/building-a-gas-turbine-model.md).
 - **Fixed, in-place progress bars, on by default — landed.**
   `thermowave.core.progress.ProgressBar` replaces the old scrolling
   per-iteration table: `Network.solve()` shows one line that redraws in

@@ -9,7 +9,7 @@ from thermowave.core.exceptions import ConvergenceError, NetworkTopologyError
 
 if TYPE_CHECKING:
     from thermowave.components.base_component import BaseComponent
-    from thermowave.core.network import Network
+    from thermowave.core.network import Network, NetworkState
     from thermowave.fluids.base_fluid import BaseFluid
 
 
@@ -212,6 +212,27 @@ class SolveResult:
         # composition-changing component, in which case every node just
         # falls back to `fluid` via NetworkState.fluid_at().
         self.node_fluid = node_fluid if node_fluid is not None else {}
+
+    def state(self) -> "NetworkState":
+        """This result as a NetworkState, for calling a component's own
+        report_metrics()/Q() against the converged solution.
+
+        Reading anything a component computes rather than stores (a
+        compressor's PR, a heat path's Q, a shaft's net power) means handing
+        it a NetworkState, and the only place one otherwise exists is inside
+        the solve that just finished. Without this, every caller rebuilds the
+        same six-field object by hand.
+        """
+        from thermowave.core.network import NetworkState
+
+        return NetworkState(
+            fluid=self.fluid,
+            node_P=self.node_P,
+            node_h=self.node_h,
+            node_mdot=self.node_mdot,
+            params=self.params,
+            node_fluid=self.node_fluid,
+        )
 
     def print_report(self) -> None:
         """Print a nicely formatted summary + per-node (P, T, h) table."""
@@ -585,13 +606,17 @@ class Solver:
             reporting.print_system_summary(n_unknowns, n_equations)
 
         if n_unknowns != n_equations:
-            raise NetworkTopologyError(
+            message = (
                 f"Network is not solvable as wired: {n_unknowns} unknown(s) but "
                 f"{n_equations} equation(s) (a Newton solve needs a square system, "
                 f"equal counts of both). Check that every free parameter (e.g. a "
                 f"component left with N=None) has exactly one matching target "
                 f"residual (e.g. a Setpoint), and that nothing is targeted twice."
             )
+            problems = network.check_wiring()
+            if problems:
+                message += "\n\nLikely cause:\n" + "\n".join(f"  - {p}" for p in problems)
+            raise NetworkTopologyError(message)
 
         if n_unknowns == 0:
             node_P, node_h, node_mdot, params = unpack(x0)

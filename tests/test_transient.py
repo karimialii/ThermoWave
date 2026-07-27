@@ -25,9 +25,14 @@ def _build_dynamic_turboshaft(N0: float = 60000.0, inertia: float = 0.05):
     comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
     heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-300000.0)
     turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
+    # efficiency=1.0 deliberately: on a dynamic shaft the steady equilibrium
+    # is net power == 0, and Shaft.efficiency scales that net, so any value
+    # here cancels (see Shaft's own dynamic-efficiency warning). Every
+    # assertion below is unchanged from when this said 0.98 — which is
+    # exactly the point of the warning.
     shaft = Shaft(
         name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
-        efficiency=0.98, inertia=inertia, dynamic=True, N0=N0,
+        efficiency=1.0, inertia=inertia, dynamic=True, N0=N0,
     )
     snk = Sink(name="snk")
 
@@ -370,3 +375,19 @@ def test_solve_transient_verbose_interactive_redraws_progress_bar_in_place(monke
     assert "\033[32m" in out  # green on completion
     assert "Done:" in out
     assert "step 3" in out
+
+
+def test_solve_transient_names_a_differential_state_missing_from_initial():
+    # The most likely failure on the steady -> transient path: `initial` came
+    # from a network where something wasn't dynamic yet (or a ThermalMass
+    # hadn't been added). Previously a bare KeyError from a dict comprehension.
+    network, shaft = _build_dynamic_turboshaft(N0=60000.0)
+    steady = network.solve(tol=1e-8, max_iter=400, damping=0.3, progress=False)
+
+    stripped = copy.copy(steady)
+    stripped.params = {k: v for k, v in steady.params.items() if k != "shaft.N"}
+
+    with pytest.raises(ValueError, match="no value for differential state shaft.N"):
+        network.solve_transient(
+            duration=0.2, dt=0.05, initial=stripped, tol=1e-8, max_iter=400, damping=0.3,
+        )

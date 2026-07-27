@@ -6,6 +6,8 @@ from thermowave.components.base_component import BaseComponent
 from thermowave.components.sensor import SENSOR_QUANTITIES as _ALLOWED_QUANTITIES
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from thermowave.core.network import NetworkState
 
 
@@ -34,7 +36,7 @@ class PIDController(BaseComponent):
 
     output0 both seeds self.output for the very first solve (must already put
     free_param somewhere reasonable) and acts as a fixed bias added to every
-    later output: output = output0 + Kp*error + Ki*integral + Kd*derivative.
+    later output: output = bias + Kp*error + Ki*integral + Kd*derivative.
     Without that bias, a free_param whose sensible operating range doesn't
     straddle zero (a shaft speed in rev/min, say) could only be reached by
     winding the integral term up to that whole magnitude, which fights
@@ -45,6 +47,20 @@ class PIDController(BaseComponent):
     accumulates further in the direction that's already saturating once
     output_min/output_max is hit, so it doesn't keep growing unboundedly
     while saturated.
+
+    feedforward: an optional callable(state) -> float replacing that constant
+    bias with one computed fresh each step, so the operating point the PID
+    trims around can *move* with the plant instead of being pinned to
+    whatever it was at t=0. This matters wherever a machine's required
+    actuator setting is mostly a known function of its load: on a gas turbine
+    the fuel flow needed is set by the energy balance, so biasing from the
+    commanded load (feedforward=lambda state: fuel_for(load.power)) leaves
+    the PI trimming a small correction, rather than having to integrate
+    across the whole actuator range to find the operating point at all. The
+    difference isn't just settling time — a plant can have regions with no
+    steady state at all (too little fuel to carry the load), and an integral
+    term wandering to find its bias can walk straight into one. self.bias is
+    used when feedforward is None.
     """
 
     def __init__(
@@ -61,6 +77,7 @@ class PIDController(BaseComponent):
         output0: float = 0.0,
         output_min: float | None = None,
         output_max: float | None = None,
+        feedforward: "Callable[[NetworkState], float] | None" = None,
     ):
         if free_param not in component.free_parameters():
             raise ValueError(
@@ -80,13 +97,22 @@ class PIDController(BaseComponent):
         self.Kd = Kd
         self.output_min = output_min
         self.output_max = output_max
+        self.feedforward = feedforward
         self.output = output0
-        self._bias = output0
+        # Public so a Schedule can drive it along a time profile
+        # (Schedule(target=pid, attr="bias", ...)) the same way it drives a
+        # setpoint — the simplest form of feedforward when the operating
+        # point is known as a function of time rather than of state.
+        self.bias = output0
+        self._output0 = output0
         self._integral = 0.0
         self._prev_error: float | None = None
 
     def ports(self) -> dict[str, str]:
         return {}
+
+    def closes_parameters(self) -> list[str]:
+        return [f"{self.component.name}.{self.free_param}"]
 
     def report_category(self) -> str:
         return "controller"
@@ -108,6 +134,23 @@ class PIDController(BaseComponent):
             )
         return metrics[self.quantity]
 
+    def reset(self, output0: float | None = None) -> None:
+        """Clear the integral term, the remembered previous error, and the
+        current output — everything step() accumulates.
+
+        A PIDController carries that state on the instance, so reusing one
+        across two solve_transient() runs would otherwise silently start the
+        second run with the first one's wound-up integral. output0 re-seeds
+        both output and bias if given; otherwise both return to the value
+        passed at construction.
+        """
+        if output0 is not None:
+            self._output0 = output0
+        self.output = self._output0
+        self.bias = self._output0
+        self._integral = 0.0
+        self._prev_error = None
+
     def step(self, state: "NetworkState", dt: float) -> float:
         """Advance the controller by one transient step: read the sensor off
         the just-solved state, compute the PID law, and update self.output
@@ -121,8 +164,9 @@ class PIDController(BaseComponent):
             derivative = (error - self._prev_error) / dt
         candidate_integral = self._integral + error * dt if dt > 0.0 else self._integral
 
+        bias = self.feedforward(state) if self.feedforward is not None else self.bias
         raw_output = (
-            self._bias + self.Kp * error + self.Ki * candidate_integral + self.Kd * derivative
+            bias + self.Kp * error + self.Ki * candidate_integral + self.Kd * derivative
         )
         clamped_output = self._clamp(raw_output)
         if clamped_output == raw_output:

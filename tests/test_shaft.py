@@ -1,4 +1,5 @@
 import math
+import warnings
 
 import pytest
 
@@ -235,3 +236,34 @@ def test_dynamic_shaft_report_metrics_reads_speed_from_differential_state():
     shaft = Shaft(name="shaft", components=[a, b], dynamic=True, inertia=0.05)
     state = _FakeState({"a.N": 5000.0, "b.N": 5000.0, "shaft.N": 4321.0})
     assert math.isclose(shaft.report_metrics(state)["N [rev/min]"], 4321.0)
+
+
+def test_shaft_warns_when_dynamic_efficiency_would_silently_cancel():
+    # Shaft.efficiency scales the *net* shaft power, and a dynamic shaft's
+    # steady equilibrium is exactly net == 0 -- so the factor cancels and
+    # the mechanical loss disappears without any error. Belongs on the load
+    # (ShaftLoad(efficiency=...)), where it scales a one-way power draw.
+    comp, turb = _free_pair()
+    with pytest.warns(UserWarning, match="efficiency scales the \\*net\\* shaft power"):
+        Shaft(
+            name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
+            efficiency=0.98, inertia=0.05, dynamic=True, N0=60000.0,
+        )
+
+
+def test_shaft_does_not_warn_for_dynamic_with_unity_efficiency():
+    comp, turb = _free_pair()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any warning becomes a failure
+        Shaft(
+            name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
+            efficiency=1.0, inertia=0.05, dynamic=True, N0=60000.0,
+        )
+
+
+def test_shaft_does_not_warn_for_static_efficiency():
+    # In static mode net power is genuinely non-zero, so efficiency is real.
+    comp, turb = _free_pair()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        Shaft(name="shaft", components=[comp, turb], signs=[-1.0, 1.0], efficiency=0.98)

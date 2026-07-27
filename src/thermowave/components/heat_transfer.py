@@ -24,14 +24,53 @@ def _temperature_of(source: TemperatureSource, state: "NetworkState") -> float:
     return state.fluid_at(node).temperature_ph(*state.node(node))
 
 
-def heat_loss_watts(heat_path: BaseComponent | None, state: "NetworkState") -> float:
-    """Q [W] a flow component (Turbine/Compressor/Combustor/...) is currently
-    losing through its optional heat_path (Convection/Conduction/Radiation),
-    or 0.0 if it has none. Positive = heat leaving that component's fluid,
-    same sign convention Pipe's own heat_loss already uses."""
+def normalized_heat_paths(
+    heat_path: "BaseComponent | list | tuple | None",
+) -> list[tuple[BaseComponent, float]]:
+    """A flow component's heat_path attribute as a uniform list of
+    (path, sign) pairs, whatever shape it was left in.
+
+    Three accepted shapes, so a heat_path set by hand still works exactly as
+    it did before Network.add_heat_path() existed:
+      - None                      -> []
+      - a single path             -> [(path, +1.0)]   (the legacy scalar form)
+      - a list of paths and/or    -> as given, bare paths defaulting to +1.0
+        (path, sign) pairs
+
+    sign is +1.0 when this component is the path's `a` endpoint (it *loses*
+    Q, which is what heat_loss_watts() reports) and -1.0 when it's `b` (it
+    *gains* Q) -- the mirror image of ThermalMass.heat_sources' convention,
+    since that one sums heat *into* the mass. Network.add_heat_path() derives
+    both automatically; nothing here has to be signed by hand.
+    """
     if heat_path is None:
-        return 0.0
-    return heat_path.Q(state)
+        return []
+    if isinstance(heat_path, (list, tuple)):
+        pairs: list[tuple[BaseComponent, float]] = []
+        for entry in heat_path:
+            if isinstance(entry, tuple):
+                path, sign = entry
+                pairs.append((path, float(sign)))
+            else:
+                pairs.append((entry, 1.0))
+        return pairs
+    return [(heat_path, 1.0)]
+
+
+def heat_loss_watts(
+    heat_path: "BaseComponent | list | tuple | None", state: "NetworkState"
+) -> float:
+    """Net Q [W] a flow component (Turbine/Compressor/Combustor/...) is
+    currently losing through its heat_path, or 0.0 if it has none. Positive =
+    heat leaving that component's fluid, same sign convention Pipe's own
+    heat_loss already uses.
+
+    heat_path may be a single path (the original form) or a list of them, so
+    one component can sit on several paths at once -- e.g. a combustor liner
+    both radiating to its casing and convecting to the annulus air. See
+    normalized_heat_paths() for the accepted shapes and the sign rule.
+    """
+    return sum(sign * path.Q(state) for path, sign in normalized_heat_paths(heat_path))
 
 
 class ThermalMass(BaseComponent):
@@ -47,14 +86,20 @@ class ThermalMass(BaseComponent):
     input here rather than computed from geometry.
 
     heat_sources is a plain mutable list of (heat_path, sign) pairs, left
-    empty at construction and appended to (or assigned wholesale) once the
-    Convection/Conduction/Radiation components referencing this mass exist
-    — they must be built after both of their endpoints, so this mass can't
-    know about them yet at its own construction time. sign is +1.0 if this
-    mass is heat_path's `b` endpoint (gains heat_path.Q()) or -1.0 if it's
-    the `a` endpoint (loses it) — same convention Shaft's components/signs
-    pair already uses for summing signed contributions from other
-    components' report_metrics().
+    empty at construction and filled in once the Convection/Conduction/
+    Radiation components referencing this mass exist — they must be built
+    after both of their endpoints, so this mass can't know about them yet at
+    its own construction time. sign is +1.0 if this mass is heat_path's `b`
+    endpoint (gains heat_path.Q()) or -1.0 if it's the `a` endpoint (loses
+    it) — same convention Shaft's components/signs pair already uses for
+    summing signed contributions from other components' report_metrics().
+
+    Prefer Network.add_heat_path(path), which derives that sign from which
+    endpoint this mass actually is and appends here for you (and registers
+    the mass with the network, so its T never goes missing from the Newton
+    system). Appending by hand still works, but nothing validates a
+    hand-picked sign against the path's own a/b — get it backwards and the
+    mass silently gains heat it should be losing.
 
     dT/dt = (sum of sign*heat_path.Q(state) over heat_sources) /
     thermal_capacitance. Network.solve() closes T to whatever value makes

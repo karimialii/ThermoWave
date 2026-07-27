@@ -117,11 +117,207 @@ class Network:
 
     def add_component(self, component: "BaseComponent") -> None:
         self.components.append(component)
+        self._register_nodes(component)
+
+    def _register_nodes(self, component: "BaseComponent") -> None:
         for port_id in component.ports().values():
             self._parent.setdefault(port_id, port_id)
             self.graph.add_node(port_id)
         for node_name in component.internal_nodes():
             self.graph.add_node(node_name)
+
+    def add_heat_path(self, path: "BaseComponent") -> "BaseComponent":
+        """Wire a Convection/Conduction/Radiation into this network, both
+        endpoints included — the heat-transfer counterpart to connect().
+
+        A heat path couples its two endpoints (`path.a` and `path.b`) through
+        their own residuals rather than by merging node state, so it isn't a
+        connect() kind: there's no shared (P, h) node to union. What it does
+        need is a back-reference on each endpoint, which is what this does:
+
+          - a ThermalMass endpoint gets (path, sign) appended to its
+            heat_sources, so its dT/dt picks the path up;
+          - a (component, port) endpoint gets the path appended to that
+            component's heat_path, so its energy residual picks it up;
+          - a plain float endpoint (ambient) needs nothing.
+
+        The sign is derived from which endpoint each side actually is, never
+        asked for. Q is positive when `a` is hotter than `b` (heat flowing
+        a -> b), so:
+
+          - a ThermalMass sums heat *in*: +1.0 as `b` (gains), -1.0 as `a`.
+          - a flow component reports heat *lost*: +1.0 as `a` (loses),
+            -1.0 as `b` (gains).
+
+        Those two are mirror images of each other, which is exactly the kind
+        of bookkeeping that's easy to get backwards by hand — and a wrong
+        sign doesn't fail, it silently creates or destroys energy.
+
+        Also registers the path itself (so it appears in the Heat Transfer
+        Paths report table) and any ThermalMass endpoint not yet added — a
+        mass that never reaches add_component() contributes no differential
+        state, and the first thing to notice is a bare KeyError on its own
+        temperature deep inside a residual call.
+
+        Idempotent: adding the same path twice is a no-op rather than
+        double-counting its Q.
+        """
+        for attr in ("a", "b"):
+            if not hasattr(path, attr):
+                raise NetworkTopologyError(
+                    f"add_heat_path() expects a heat path with .a/.b endpoints "
+                    f"(Convection, Conduction, Radiation), but "
+                    f"{getattr(path, 'name', path)!r} has no {attr!r}."
+                )
+        if not callable(getattr(path, "Q", None)):
+            raise NetworkTopologyError(
+                f"add_heat_path() expects a heat path exposing Q(state), but "
+                f"{getattr(path, 'name', path)!r} doesn't."
+            )
+
+        if path in self.components:
+            return path  # already wired; re-adding must not double-count Q
+
+        # Endpoint `a` loses Q, endpoint `b` gains it. mass_sign sums heat
+        # *into* the mass; loss_sign reports heat *out of* the fluid.
+        for endpoint, mass_sign, loss_sign in ((path.a, -1.0, 1.0), (path.b, 1.0, -1.0)):
+            self._attach_heat_endpoint(path, endpoint, mass_sign, loss_sign)
+
+        self.add_component(path)
+        return path
+
+    def _attach_heat_endpoint(
+        self, path: "BaseComponent", endpoint: object, mass_sign: float, loss_sign: float
+    ) -> None:
+        from thermowave.components.heat_transfer import ThermalMass, normalized_heat_paths
+
+        if isinstance(endpoint, ThermalMass):
+            if endpoint not in self.components:
+                self.add_component(endpoint)
+            if not any(existing is path for existing, _ in endpoint.heat_sources):
+                endpoint.heat_sources.append((path, mass_sign))
+            return
+
+        if isinstance(endpoint, (int, float)):
+            return  # a fixed ambient temperature has nothing to wire back
+
+        try:
+            component, port_name = endpoint
+        except (TypeError, ValueError) as exc:
+            raise NetworkTopologyError(
+                f"Heat path {getattr(path, 'name', path)!r} has an endpoint that isn't a "
+                f"ThermalMass, a number (ambient), or a (component, port) pair: "
+                f"{endpoint!r}"
+            ) from exc
+
+        # Raises a named NetworkTopologyError now rather than a bare KeyError
+        # later, once this path is already deep inside a residual evaluation.
+        self._resolve_port(component, port_name)
+
+        if not hasattr(component, "heat_path"):
+            raise NetworkTopologyError(
+                f"Heat path {getattr(path, 'name', path)!r} attaches to "
+                f"{component.name!r}.{port_name}, but {component.name!r} has no "
+                f"heat_path attribute to hang it on — only components whose energy "
+                f"residual reads one (Compressor, Turbine, Combustor and their Simple* "
+                f"counterparts) can sit on a heat path. Pipe takes a scalar heat_loss "
+                f"instead."
+            )
+
+        paths = normalized_heat_paths(component.heat_path)
+        if not any(existing is path for existing, _ in paths):
+            paths.append((path, loss_sign))
+        component.heat_path = paths
+
+    def remove_component(self, component: "BaseComponent") -> None:
+        """Remove a component, its connections, and any heat-path references
+        to it — the inverse of add_component().
+
+        The main use is swapping what closes a free parameter between solves:
+        a steady solve pins a compressor's speed with a Controller, then the
+        transient run wants a PIDController on the same unknown. Both pin it
+        with one residual each, so the Controller has to go first or the
+        system is over-determined by exactly one equation.
+
+        Rebuilds the port graph and union-find from the survivors rather than
+        unpicking them in place: _parent is a flat child -> parent map with
+        path compression and no reverse index, so removing a port id that
+        happens to be a union root can't be undone incrementally. Everything
+        else the solver reads (_all_nodes, _fixed_node_values, ...) is already
+        recomputed from self.components on every call, so there's nothing
+        else cached to unwind.
+        """
+        if component not in self.components:
+            raise NetworkTopologyError(
+                f"Component {getattr(component, 'name', component)!r} is not in this "
+                f"network, so it can't be removed."
+            )
+
+        self.components = [c for c in self.components if c is not component]
+        self.connections = [
+            c
+            for c in self.connections
+            if c.from_component is not component and c.to_component is not component
+        ]
+        self._drop_heat_references(component)
+        self._rebuild_topology()
+
+    def replace_component(
+        self, old: "BaseComponent", new: "BaseComponent"
+    ) -> "BaseComponent":
+        """remove_component(old) then add_component(new). See
+        remove_component() for why the Controller -> PIDController swap needs
+        this rather than just adding the new one."""
+        self.remove_component(old)
+        self.add_component(new)
+        return new
+
+    def _drop_heat_references(self, component: "BaseComponent") -> None:
+        """Forget a removed component wherever a heat path or thermal mass
+        still points at it, so nothing calls Q() on a path that's no longer
+        part of the network (or on a path whose endpoint just left)."""
+        from thermowave.components.heat_transfer import ThermalMass, normalized_heat_paths
+
+        def endpoint_is_gone(endpoint: object) -> bool:
+            if endpoint is component:
+                return True
+            if isinstance(endpoint, (int, float)) or isinstance(endpoint, ThermalMass):
+                return False
+            if isinstance(endpoint, tuple) and len(endpoint) == 2:
+                return endpoint[0] is component
+            return False
+
+        def path_is_gone(path: "BaseComponent") -> bool:
+            if path is component:
+                return True
+            return endpoint_is_gone(getattr(path, "a", None)) or endpoint_is_gone(
+                getattr(path, "b", None)
+            )
+
+        for remaining in self.components:
+            if isinstance(remaining, ThermalMass):
+                remaining.heat_sources = [
+                    (path, sign) for path, sign in remaining.heat_sources if not path_is_gone(path)
+                ]
+            if hasattr(remaining, "heat_path") and remaining.heat_path is not None:
+                kept = [
+                    (path, sign)
+                    for path, sign in normalized_heat_paths(remaining.heat_path)
+                    if not path_is_gone(path)
+                ]
+                remaining.heat_path = kept or None
+
+    def _rebuild_topology(self) -> None:
+        """Rebuild graph + union-find from self.components/self.connections."""
+        self.graph = nx.DiGraph()
+        self._parent = {}
+        for component in self.components:
+            self._register_nodes(component)
+        for connection in self.connections:
+            from_id = self._resolve_port(connection.from_component, connection.from_port)
+            to_id = self._resolve_port(connection.to_component, connection.to_port)
+            self._union(from_id, to_id)
+            self.graph.add_edge(from_id, to_id, kind=connection.kind)
 
     def connect(
         self,
@@ -299,6 +495,75 @@ class Network:
                 if node_name in canon_fluid:
                     node_fluid[node_name] = canon_fluid[node_name]
         return node_fluid
+
+    def check_wiring(self) -> list[str]:
+        """Problems with how free parameters are targeted, as plain sentences.
+
+        The solver's own squareness check knows only that unknowns and
+        equations disagree by some count — it can't say which parameter is
+        loose or which two components are fighting over one. This walks the
+        same wiring it does and names them, and is appended to that error
+        when it fires (see Solver.solve()).
+
+        Who closes what comes from BaseComponent.closes_parameters(), which
+        a Setpoint/Controller/PIDController answers with its own target and a
+        Shaft answers with its speed-tied members' speeds. Returns [] when
+        nothing looks wrong; a network can still be non-square for reasons
+        this doesn't model (a component contributing the wrong number of
+        residuals for its own ports), so an empty list is not a guarantee.
+        """
+        problems: list[str] = []
+
+        free_params: set[str] = set()
+        for component in self.components:
+            declared = set(component.free_parameters())
+            # The solver actually discovers unknowns through
+            # guess_free_parameters(), while every controller validates
+            # against free_parameters() — override one without the other and
+            # the two silently disagree about what's even solvable.
+            guessed = set(component.guess_free_parameters(self.fluid, 101325.0, 3e5, 1.0))
+            if declared != guessed:
+                problems.append(
+                    f"{component.name!r} declares free parameters {sorted(declared)} from "
+                    f"free_parameters() but {sorted(guessed)} from guess_free_parameters() "
+                    f"— the solver uses the latter to create unknowns while Setpoint/"
+                    f"Controller/PIDController validate against the former, so these must "
+                    f"return the same keys."
+                )
+            free_params |= {f"{component.name}.{key}" for key in declared | guessed}
+
+        closed_by: dict[str, list[str]] = {name: [] for name in free_params}
+        for component in self.components:
+            target = getattr(component, "component", None)
+            if target is not None and target not in self.components:
+                problems.append(
+                    f"{component.name!r} targets {getattr(target, 'name', target)!r}, but "
+                    f"that component is not in this network — it was probably removed (or "
+                    f"never added) while its controller stayed."
+                )
+                continue
+            for name in component.closes_parameters():
+                closed_by.setdefault(name, []).append(component.name)
+
+        for name, holders in sorted(closed_by.items()):
+            if name not in free_params:
+                continue
+            if not holders:
+                problems.append(
+                    f"{name} is free (left as None) but nothing closes it — add a "
+                    f"Setpoint/Controller/PIDController to drive it, tie it to a Shaft, "
+                    f"or give the component a fixed value instead of None."
+                )
+            elif len(holders) > 1:
+                problems.append(
+                    f"{name} is closed by {len(holders)} components ({', '.join(sorted(holders))}) "
+                    f"but is only one unknown — each contributes its own residual, so all "
+                    f"but one must be removed (see Network.remove_component/"
+                    f"replace_component, e.g. swapping a steady-state Controller for a "
+                    f"transient PIDController)."
+                )
+
+        return problems
 
     def validate_topology(self) -> None:
         if not self._fixed_node_values():

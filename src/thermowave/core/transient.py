@@ -205,6 +205,18 @@ def solve_transient(
             tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
         )
 
+    missing = [name for name in full_names if name not in initial.params]
+    if missing:
+        raise ValueError(
+            f"solve_transient() can't start from the given `initial` result: it has no "
+            f"value for differential state {', '.join(sorted(missing))}, which "
+            f"component(s) in this network declare. Either that result came from a "
+            f"different network (or from before a component was made dynamic — e.g. "
+            f"Shaft(dynamic=True) or a ThermalMass added since), or the component was "
+            f"added after `initial` was solved. Re-solve this network "
+            f"(network.solve(...)) and pass that result instead, or omit `initial` to "
+            f"let solve_transient() establish the t=0 equilibrium itself."
+        )
     prev_diff_values = {name: initial.params[name] for name in full_names}
 
     times: list[float] = [0.0]

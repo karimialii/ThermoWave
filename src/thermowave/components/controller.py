@@ -54,6 +54,9 @@ class Controller(BaseComponent):
     def ports(self) -> dict[str, str]:
         return {}
 
+    def closes_parameters(self) -> list[str]:
+        return [f"{self.component.name}.{self.free_param}"]
+
     def report_category(self) -> str:
         return "controller"
 
