@@ -1,0 +1,18 @@
+<svg viewBox="0 0 520 260" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2b3a4a"/>
+  </marker>
+  <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+  </marker>
+  <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#1a6b8f"/>
+  </marker>
+</defs>
+<style>
+  .lbl { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; fill:#2b3a4a; }
+  .tag { font-family:Menlo,Consolas,monospace; font-size:12px; fill:#2b3a4a; }
+  .title { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; font-weight:600; fill:#2b3a4a; }
+</style>
+<text x="200.0" y="22" text-anchor="middle" class="title">Drum (constant-volume, two-phase reservoir)</text><rect x="200.0" y="80.0" width="120" height="120" rx="16" fill="#eef3f7" stroke="#2b3a4a" stroke-width="2"/><text x="260.0" y="140.0" text-anchor="middle" class="lbl">Drum</text><text x="260.0" y="158.0" text-anchor="middle" class="tag">P, h (state)</text><line x1="130.0" y1="100.0" x2="194.0" y2="100.0" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/><text x="130.0" y="92.0" class="tag">feed_in</text><line x1="130.0" y1="180.0" x2="194.0" y2="180.0" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/><text x="130.0" y="172.0" class="tag">riser_in</text><line x1="326.0" y1="100.0" x2="400.0" y2="100.0" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/><text x="372.0" y="92.0" class="tag">steam_out</text><line x1="326.0" y1="180.0" x2="400.0" y2="180.0" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/><text x="372.0" y="172.0" class="tag">water_out</text></svg>

@@ -1,0 +1,22 @@
+# Source
+
+<img src="../../_static/diagrams/source.svg" alt="Source diagram" style="max-width:100%">
+
+A boundary condition fixing outlet pressure and temperature, and (usually)
+mass flow rate.
+
+**Ports:** `out`
+
+**Fixes:** `(P, h)` at `out`, from the given `P`/`T` (converted to SI via
+`fluid.enthalpy_pt`). If `mdot` is given, it also fixes `mdot` at `out`.
+
+**Free parameter:** none of its own — but leaving `mdot=None` removes the
+mass-flow fixing entirely, turning total network flow into an ordinary
+Newton unknown (closed by something else downstream, e.g. a [`Sink`](sink.md)
+pinning exit pressure). `mdot_guess` seeds that unknown's initial guess.
+
+**Residuals:** none — a `Source` only fixes values, it doesn't compute
+anything.
+
+---
+Part of [Flow elements](index.md).

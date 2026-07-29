@@ -20,8 +20,15 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
+    "sphinx.ext.mathjax",
     "myst_parser",
 ]
+
+myst_enable_extensions = [
+    "dollarmath",
+    "amsmath",
+]
+myst_heading_anchors = 3
 
 autosummary_generate = True
 autodoc_default_options = {
@@ -42,3 +49,4 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "sphinx_rtd_theme"
+html_static_path = ["_static"]

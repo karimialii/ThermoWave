@@ -47,7 +47,7 @@ pip install -e ".[full]"       # everything, including dev/test tooling
 
 ## Guides
 
-- [Building a gas-turbine model](docs/building-a-gas-turbine-model.md) — a
+- [Building a gas-turbine model](docs/tutorials/building-a-gas-turbine-model.md) — a
   single-shaft recuperated microturbine end to end: components, thermal
   network, steady solve, swapping the steady controllers for PIDs, and the
   transient run seeded from steady. Includes the traps that cost real
@@ -628,7 +628,7 @@ section above).
   replaces the `NetworkState` boilerplate every caller was rebuilding by hand.
   `Shaft` now warns when `dynamic=True` is given a non-unity `efficiency`,
   which silently cancels at equilibrium. See
-  [the gas-turbine guide](docs/building-a-gas-turbine-model.md).
+  [the gas-turbine guide](docs/tutorials/building-a-gas-turbine-model.md).
 - **Fixed, in-place progress bars, on by default — landed.**
   `thermowave.core.progress.ProgressBar` replaces the old scrolling
   per-iteration table: `Network.solve()` shows one line that redraws in

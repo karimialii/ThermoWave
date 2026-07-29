@@ -1,0 +1,18 @@
+<svg viewBox="0 0 520 260" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2b3a4a"/>
+  </marker>
+  <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+  </marker>
+  <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#1a6b8f"/>
+  </marker>
+</defs>
+<style>
+  .lbl { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; fill:#2b3a4a; }
+  .tag { font-family:Menlo,Consolas,monospace; font-size:12px; fill:#2b3a4a; }
+  .title { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; font-weight:600; fill:#2b3a4a; }
+</style>
+<text x="200.0" y="22" text-anchor="middle" class="title">ThermalMass (T as differential state — no flow ports)</text><circle cx="260.0" cy="140.0" r="55" fill="#eef3f7" stroke="#2b3a4a" stroke-width="2"/><text x="260.0" y="140.0" text-anchor="middle" class="lbl">ThermalMass</text><text x="260.0" y="158.0" text-anchor="middle" class="tag">T (state)</text><line x1="230.0" y1="85.0" x2="230.0" y2="45.0" stroke="#c0392b" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow-red)"/><text x="238.0" y="71.0" class="tag" fill="#c0392b">heat_sources[i]</text><line x1="290.0" y1="85.0" x2="290.0" y2="45.0" stroke="#c0392b" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow-red)"/><text x="298.0" y="71.0" class="tag" fill="#c0392b">...</text></svg>

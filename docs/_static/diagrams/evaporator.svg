@@ -1,0 +1,18 @@
+<svg viewBox="0 0 520 260" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2b3a4a"/>
+  </marker>
+  <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+  </marker>
+  <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#1a6b8f"/>
+  </marker>
+</defs>
+<style>
+  .lbl { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; fill:#2b3a4a; }
+  .tag { font-family:Menlo,Consolas,monospace; font-size:12px; fill:#2b3a4a; }
+  .title { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; font-weight:600; fill:#2b3a4a; }
+</style>
+<text x="200.0" y="22" text-anchor="middle" class="title">Evaporator</text><rect x="170.0" y="85.0" width="180" height="110" rx="8" fill="#eef3f7" stroke="#2b3a4a" stroke-width="2"/><text x="260.0" y="221.0" text-anchor="middle" class="lbl">Evaporator</text><line x1="110.0" y1="110.0" x2="164.0" y2="110.0" stroke="#c0392b" stroke-width="2" marker-end="url(#arrow-red)"/><text x="110.0" y="103.0" class="tag" fill="#c0392b">wf_in</text><line x1="356.0" y1="110.0" x2="410.0" y2="110.0" stroke="#c0392b" stroke-width="2" marker-end="url(#arrow-red)"/><text x="344.0" y="103.0" class="tag" fill="#c0392b">wf_out</text><line x1="410.0" y1="170.0" x2="356.0" y2="170.0" stroke="#1a6b8f" stroke-width="2" marker-end="url(#arrow-blue)"/><text x="340.0" y="165.0" class="tag" fill="#1a6b8f">src_in</text><line x1="164.0" y1="170.0" x2="110.0" y2="170.0" stroke="#1a6b8f" stroke-width="2" marker-end="url(#arrow-blue)"/><text x="110.0" y="165.0" class="tag" fill="#1a6b8f">src_out</text></svg>

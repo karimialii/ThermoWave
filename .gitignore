@@ -7,9 +7,9 @@ __pycache__/
 .claude/
 build/
 dist/
-assets/
-examples/
-tutorials/
+/assets/
+/examples/
+/tutorials/
 
 
 # example/showcase run output written to repo root — regenerate via the
