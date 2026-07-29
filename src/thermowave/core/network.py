@@ -100,6 +100,75 @@ class Connection:
         self.kind = kind
 
 
+def _can_change_composition(component: "BaseComponent") -> bool:
+    """Whether this component can alter fluid composition between its inlet
+    and outlet — i.e. whether it overrides either composition hook.
+
+    Only Combustor (outlet_fluid) and Junction (merge_fluids) do so among the
+    package's components. Comparing the *class* attribute against
+    BaseComponent's is the correct test (bound methods would compare unequal
+    for every instance); the vars() check additionally catches an override
+    monkeypatched onto a single instance.
+    """
+    from thermowave.components.base_component import BaseComponent
+
+    cls = type(component)
+    if cls.outlet_fluid is not BaseComponent.outlet_fluid:
+        return True
+    if cls.merge_fluids is not BaseComponent.merge_fluids:
+        return True
+    instance_attrs = vars(component)
+    return "outlet_fluid" in instance_attrs or "merge_fluids" in instance_attrs
+
+
+class _FluidPropagationPlan:
+    """Precomputed, topology-only structure for Network._resolve_node_fluid().
+
+    Everything the fluid fixed-point loop needs that does *not* depend on the
+    Newton state — each component's ports, its canonical inlet/outlet ids, and
+    whether it participates as a merger — resolved once per topology version
+    instead of on every one of the ~hundreds-of-thousands of residual
+    evaluations a transient run performs. Only the actual outlet_fluid()/
+    merge_fluids() calls stay in the per-state loop.
+    """
+
+    __slots__ = (
+        "has_composition_change",
+        "seed_canon",
+        "entries",
+        "export",
+    )
+
+    def __init__(
+        self,
+        has_composition_change: bool,
+        seed_canon: tuple[str, ...],
+        entries: list,
+        export: tuple[tuple[str, str], ...],
+    ):
+        self.has_composition_change = has_composition_change
+        self.seed_canon = seed_canon
+        self.entries = entries
+        self.export = export
+
+
+class _PlanEntry:
+    """One component's frozen role in the fluid propagation plan."""
+
+    __slots__ = ("component", "is_merger", "merge_read", "merge_write", "pairs")
+
+    def __init__(self, component, is_merger, merge_read, merge_write, pairs):
+        self.component = component
+        self.is_merger = is_merger
+        # (port_name, canon) for every port, used to assemble merge_fluids'
+        # inlet dict; merge_write maps a merged output's port_name -> canon.
+        self.merge_read = merge_read
+        self.merge_write = merge_write
+        # (inlet_port, outlet_port, inlet_canon, outlet_canon) with the
+        # "port not in ports" cases already filtered out at build time.
+        self.pairs = pairs
+
+
 class Network:
     """A graph of components sharing a single working fluid and mass flow rate.
 
@@ -114,6 +183,29 @@ class Network:
         self.connections: list[Connection] = []
         self.graph = nx.DiGraph()
         self._parent: dict[str, str] = {}  # union-find: port id -> port id
+        # Caches keyed on _topology_version (bumped by _bump_topology whenever
+        # the port set or any union-find root can change). Both are recomputed
+        # lazily and cost <0.01s to rebuild across a whole transient run, but
+        # save the O(passes x components x ports) union-find traversal that
+        # _resolve_node_fluid otherwise repeats on *every* residual evaluation.
+        self._topology_version = 0
+        self._canon_cache: dict[str, str] = {}
+        self._fluid_plan: "_FluidPropagationPlan | None" = None
+
+    def _bump_topology(self) -> None:
+        """Invalidate topology-derived caches after a structural change."""
+        self._topology_version += 1
+        self._canon_cache.clear()
+        self._fluid_plan = None
+
+    def invalidate_caches(self) -> None:
+        """Public escape hatch: call after mutating a component *in place*
+        (e.g. changing a Junction's inlet count, or monkeypatching
+        outlet_fluid onto an instance) once it has already been added. The
+        ordinary add_component/connect/remove_component paths invalidate
+        automatically; direct attribute mutation on an already-registered
+        component does not, since Network can't observe it."""
+        self._bump_topology()
 
     def add_component(self, component: "BaseComponent") -> None:
         self.components.append(component)
@@ -125,6 +217,7 @@ class Network:
             self.graph.add_node(port_id)
         for node_name in component.internal_nodes():
             self.graph.add_node(node_name)
+        self._bump_topology()
 
     def add_heat_path(self, path: "BaseComponent") -> "BaseComponent":
         """Wire a Convection/Conduction/Radiation into this network, both
@@ -311,6 +404,7 @@ class Network:
         """Rebuild graph + union-find from self.components/self.connections."""
         self.graph = nx.DiGraph()
         self._parent = {}
+        self._bump_topology()
         for component in self.components:
             self._register_nodes(component)
         for connection in self.connections:
@@ -364,10 +458,22 @@ class Network:
         root_a, root_b = self._find(a), self._find(b)
         if root_a != root_b:
             self._parent[root_b] = root_a
+        self._bump_topology()
 
     def _canonical(self, port_id: str) -> str:
-        """This component port's shared network-node id after connect() merges."""
-        return self._find(port_id)
+        """This component port's shared network-node id after connect() merges.
+
+        Memoized on _topology_version: within one topology the canonical root
+        of a port never changes, and this is called O(millions) of times per
+        solve. _find is still the sole path-compressing mutator; the cache
+        only remembers its answer.
+        """
+        cached = self._canon_cache.get(port_id)
+        if cached is not None:
+            return cached
+        root = self._find(port_id)
+        self._canon_cache[port_id] = root
+        return root
 
     def _all_nodes(self) -> list[str]:
         nodes: list[str] = []
@@ -445,36 +551,57 @@ class Network:
         from fluid_flow_pairs() so the fallback pass-through path never
         races ahead and locks in a wrong single-inlet answer before all of
         that component's actual inlets are known.
+
+        Fast path: when no component in the network can change composition
+        (the common case — only Combustor/Junction can), every reachable node
+        resolves to `self.fluid`, and every *unreachable* node's fluid_at()
+        also falls back to `self.fluid` — so mapping every node to `self.fluid`
+        directly is observationally identical to running the loop, without the
+        O(passes x components x ports) union-find traversal. See
+        _can_change_composition().
         """
-        canon_fluid: dict[str, "BaseFluid"] = dict.fromkeys(self._fixed_node_values(), self.fluid)
-        for _ in range(len(self.components) + 1):
-            for component in self.components:
-                ports = component.ports()
+        plan = self._fluid_propagation_plan()
 
-                inlet_fluids = {
-                    port_name: canon_fluid[self._canonical(port_id)]
-                    for port_name, port_id in ports.items()
-                    if self._canonical(port_id) in canon_fluid
-                }
-                merged = component.merge_fluids(state, inlet_fluids)
-                if merged:
-                    for port_name, fluid in merged.items():
-                        if port_name not in ports:
-                            continue
-                        canon = self._canonical(ports[port_name])
-                        canon_fluid.setdefault(canon, fluid)
+        if not plan.has_composition_change:
+            fluid = self.fluid
+            return {raw: fluid for raw, _canon in plan.export}
 
-                for pair in component.fluid_flow_pairs():
-                    inlet_port, outlet_port = pair
-                    if inlet_port not in ports or outlet_port not in ports:
-                        continue
-                    inlet_canon = self._canonical(ports[inlet_port])
-                    outlet_canon = self._canonical(ports[outlet_port])
+        canon_fluid: dict[str, "BaseFluid"] = dict.fromkeys(plan.seed_canon, self.fluid)
+        # The fixed point is reached as soon as a full pass adds nothing new:
+        # both write paths are first-wins (setdefault / the "already known"
+        # guard), and `state` is constant across the call, so an unproductive
+        # pass proves every later pass is unproductive too. This caps a chain
+        # at 2 passes instead of the worst-case len(components)+1.
+        for _ in range(len(plan.entries) + 1):
+            added = False
+            for entry in plan.entries:
+                if entry.is_merger:
+                    inlet_fluids = {
+                        port_name: canon_fluid[canon]
+                        for port_name, canon in entry.merge_read
+                        if canon in canon_fluid
+                    }
+                    merged = entry.component.merge_fluids(state, inlet_fluids)
+                    if merged:
+                        for port_name, fluid in merged.items():
+                            canon = entry.merge_write.get(port_name)
+                            if canon is not None and canon not in canon_fluid:
+                                canon_fluid[canon] = fluid
+                                added = True
+
+                for inlet_port, outlet_port, inlet_canon, outlet_canon in entry.pairs:
                     if outlet_canon in canon_fluid or inlet_canon not in canon_fluid:
                         continue
                     inlet_fluid = canon_fluid[inlet_canon]
-                    outlet_fluid = component.outlet_fluid(state, pair, inlet_fluid)
-                    canon_fluid[outlet_canon] = outlet_fluid if outlet_fluid is not None else inlet_fluid
+                    outlet_fluid = entry.component.outlet_fluid(
+                        state, (inlet_port, outlet_port), inlet_fluid
+                    )
+                    canon_fluid[outlet_canon] = (
+                        outlet_fluid if outlet_fluid is not None else inlet_fluid
+                    )
+                    added = True
+            if not added:
+                break
 
         # Every component addresses its own ports by a raw, component-local
         # id (e.g. "pipe.in"), which may have been merged by connect() into
@@ -486,15 +613,63 @@ class Network:
         # result.node_fluid["pipe.in"]) both resolve correctly regardless of
         # which raw id happened to become the union-find root.
         node_fluid: dict[str, "BaseFluid"] = {}
-        for component in self.components:
-            for port_id in component.ports().values():
-                canon = self._canonical(port_id)
-                if canon in canon_fluid:
-                    node_fluid[port_id] = canon_fluid[canon]
-            for node_name in component.internal_nodes():
-                if node_name in canon_fluid:
-                    node_fluid[node_name] = canon_fluid[node_name]
+        for raw, canon in plan.export:
+            fluid = canon_fluid.get(canon)
+            if fluid is not None:
+                node_fluid[raw] = fluid
         return node_fluid
+
+    def _fluid_propagation_plan(self) -> "_FluidPropagationPlan":
+        """Build (and cache per topology version) the state-independent
+        structure _resolve_node_fluid() walks. See _FluidPropagationPlan."""
+        if self._fluid_plan is not None:
+            return self._fluid_plan
+
+        from thermowave.components.base_component import BaseComponent
+
+        has_change = any(_can_change_composition(c) for c in self.components)
+
+        seed_canon = tuple(self._fixed_node_values())
+
+        entries: list = []
+        export: list[tuple[str, str]] = []
+        for component in self.components:
+            ports = component.ports()
+            is_merger = (
+                type(component).merge_fluids is not BaseComponent.merge_fluids
+                or "merge_fluids" in vars(component)
+            )
+            merge_read = tuple(
+                (port_name, self._canonical(port_id))
+                for port_name, port_id in ports.items()
+            )
+            merge_write = {
+                port_name: self._canonical(port_id)
+                for port_name, port_id in ports.items()
+            }
+            pairs = tuple(
+                (
+                    inlet_port,
+                    outlet_port,
+                    self._canonical(ports[inlet_port]),
+                    self._canonical(ports[outlet_port]),
+                )
+                for inlet_port, outlet_port in component.fluid_flow_pairs()
+                if inlet_port in ports and outlet_port in ports
+            )
+            entries.append(
+                _PlanEntry(component, is_merger, merge_read, merge_write, pairs)
+            )
+
+            for port_id in ports.values():
+                export.append((port_id, self._canonical(port_id)))
+            for node_name in component.internal_nodes():
+                export.append((node_name, node_name))
+
+        self._fluid_plan = _FluidPropagationPlan(
+            has_change, seed_canon, entries, tuple(export)
+        )
+        return self._fluid_plan
 
     def check_wiring(self) -> list[str]:
         """Problems with how free parameters are targeted, as plain sentences.
@@ -588,6 +763,7 @@ class Network:
         dt: float | None = None,
         prev_diff_values: dict[str, float] | None = None,
         warm_start: "SolveResult | None" = None,
+        jacobian_reuse: int | None = None,
     ) -> "SolveResult":
         """dt/prev_diff_values are advanced/internal — see Solver.solve()
         and BaseComponent.differential_parameters(). Ordinary steady-state
@@ -609,6 +785,7 @@ class Network:
         return Solver(self).solve(
             tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
             dt=dt, prev_diff_values=prev_diff_values, warm_start=warm_start,
+            jacobian_reuse=jacobian_reuse,
         )
 
     def solve_transient(
@@ -630,6 +807,7 @@ class Network:
         growth_limit: float = 5.0,
         shrink_limit: float = 0.2,
         max_step_shrinks: int = 10,
+        jacobian_reuse: int | None = None,
     ) -> "TransientResult":
         """Quasi-steady transient over every differential state any
         component in this network declares (e.g. a dynamic Shaft's rotor
@@ -644,5 +822,5 @@ class Network:
             tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
             adaptive=adaptive, rtol=rtol, atol=atol, dt_min=dt_min, dt_max=dt_max,
             safety=safety, growth_limit=growth_limit, shrink_limit=shrink_limit,
-            max_step_shrinks=max_step_shrinks,
+            max_step_shrinks=max_step_shrinks, jacobian_reuse=jacobian_reuse,
         )

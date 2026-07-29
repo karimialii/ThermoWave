@@ -100,6 +100,7 @@ def solve_transient(
     growth_limit: float = 5.0,
     shrink_limit: float = 0.2,
     max_step_shrinks: int = 10,
+    jacobian_reuse: int | None = None,
 ) -> TransientResult:
     """Quasi-steady transient over every differential state declared by any
     component in the network (BaseComponent.differential_parameters() /
@@ -203,6 +204,7 @@ def solve_transient(
     if initial is None:
         initial = network.solve(
             tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
+            jacobian_reuse=jacobian_reuse,
         )
 
     missing = [name for name in full_names if name not in initial.params]
@@ -254,7 +256,7 @@ def solve_transient(
         # single transient progress bar above replaces.
         return network.solve(
             tol=tol, max_iter=max_iter, damping=damping, verbose=False, progress=False,
-            dt=h, prev_diff_values=prev, warm_start=seed,
+            dt=h, prev_diff_values=prev, warm_start=seed, jacobian_reuse=jacobian_reuse,
         )
 
     t = 0.0
