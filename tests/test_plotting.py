@@ -1,20 +1,21 @@
-import math
 
 import pytest
 
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
-from thermowave.components.compressor import Compressor
-from thermowave.components.pipe import Pipe
-from thermowave.components.shaft import Shaft
-from thermowave.components.sink import Sink
-from thermowave.components.source import Source
-from thermowave.components.turbine import Turbine
-from thermowave.core.network import Network, NetworkState
-from thermowave.core.plotting import ThermoPlot, plot_series
-from thermowave.fluids.ideal_gas import IdealGasFluid
-from thermowave.maps.characteristic_map import CharacteristicMap
+# matplotlib.use("Agg") above must run before these (transitively) import
+# pyplot, so the imports can't move to the top of the file.
+from thermowave.components.compressor import Compressor  # noqa: E402
+from thermowave.components.pipe import Pipe  # noqa: E402
+from thermowave.components.shaft import Shaft  # noqa: E402
+from thermowave.components.sink import Sink  # noqa: E402
+from thermowave.components.source import Source  # noqa: E402
+from thermowave.components.turbine import Turbine  # noqa: E402
+from thermowave.core.network import Network, NetworkState  # noqa: E402
+from thermowave.core.plotting import ThermoPlot, plot_series  # noqa: E402
+from thermowave.fluids.ideal_gas import IdealGasFluid  # noqa: E402
+from thermowave.maps.characteristic_map import CharacteristicMap  # noqa: E402
 
 AIR = IdealGasFluid(name="air", R=287.05, cp=1005.0)
 GAMMA = 1005.0 / (1005.0 - 287.05)

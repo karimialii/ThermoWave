@@ -25,11 +25,16 @@ dependencies = [
     "networkx>=3.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/karimialii/ThermoWave"
+Repository = "https://github.com/karimialii/ThermoWave"
+Issues = "https://github.com/karimialii/ThermoWave/issues"
+
 [project.optional-dependencies]
 coolprop = ["CoolProp>=6.4"]
 cantera = ["cantera>=3.0"]
 plot = ["matplotlib>=3.7"]
-dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.1", "mypy>=1.5"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.15,<0.16", "mypy>=1.5"]
 docs = ["sphinx>=7.2", "sphinx-rtd-theme>=2.0", "myst-parser>=2.0"]
 full = ["thermowave[coolprop,cantera,plot,dev]"]
 

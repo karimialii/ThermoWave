@@ -1,8 +1,16 @@
 import numpy as np
 import pytest
 
+from thermowave.components.base_component import BaseComponent
+from thermowave.components.pipe import Pipe
+from thermowave.components.simple_compressor import SimpleCompressor
+from thermowave.components.sink import Sink
+from thermowave.components.source import Source
+from thermowave.components.valve import Valve
 from thermowave.core.exceptions import ConvergenceError
-from thermowave.core.solver import _finite_difference_jacobian, newton_solve
+from thermowave.core.network import Network, NetworkState
+from thermowave.core.solver import Solver, _finite_difference_jacobian, newton_solve
+from thermowave.fluids.ideal_gas import IdealGasFluid
 
 
 def test_finite_difference_jacobian_matches_analytic_for_linear_system():
@@ -68,16 +76,6 @@ def test_newton_solve_applies_clamp_fn_each_iteration():
     )
     assert np.allclose(x_sol, [100.0], atol=1e-6)
 
-
-from thermowave.components.base_component import BaseComponent
-from thermowave.components.pipe import Pipe
-from thermowave.components.simple_compressor import SimpleCompressor
-from thermowave.components.sink import Sink
-from thermowave.components.source import Source
-from thermowave.components.valve import Valve
-from thermowave.core.network import Network, NetworkState
-from thermowave.core.solver import Solver
-from thermowave.fluids.ideal_gas import IdealGasFluid
 
 _AIR = IdealGasFluid(name="air", R=287.05, cp=1005.0)
 
