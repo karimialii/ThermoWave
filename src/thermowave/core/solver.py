@@ -85,6 +85,8 @@ def newton_solve(
     step_limit_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
     verbose: bool = False,
     progress: bool = True,
+    max_jacobian_reuse: int = 4,
+    jacobian_reuse_contraction: float = 0.5,
 ) -> tuple[np.ndarray, int, float]:
     """Damped Newton-Raphson with a finite-difference Jacobian.
 
@@ -96,6 +98,22 @@ def newton_solve(
     of it, matching the original fully-silent default. verbose only changes
     how much detail that bar's text carries (iteration/residual/step
     numbers) — it has no effect when progress=False.
+
+    max_jacobian_reuse: how many consecutive iterations may reuse the last
+    finite-difference Jacobian (and its Ruiz scaling) before a mandatory
+    refresh — a modified-Newton / Shamanskii step. Rebuilding the Jacobian
+    costs n+1 residual evaluations (the dominant cost of a solve), so while
+    the residual is still contracting healthily the *same* Jacobian usually
+    still points in a good-enough descent direction, and reusing it turns
+    those iterations into a single residual evaluation each. It never changes
+    which point is accepted: convergence is still declared only by
+    ‖F(x)‖ < tol below, so a stale Jacobian can only lengthen the path, not
+    move the solution. A refresh is forced whenever the residual fails to drop
+    to <= jacobian_reuse_contraction of the previous iteration's norm (so a
+    stalling or diverging step immediately gets a fresh Jacobian), and always
+    on the first iteration (which keeps a genuinely singular system raising
+    ConvergenceError right away). max_jacobian_reuse=0 disables reuse entirely,
+    restoring a plain Newton iteration that rebuilds the Jacobian every step.
 
     step_limit_fn(x, step) -> step, applied before damping and clamp_fn, caps
     how far a single iteration may move — unlike damping (one scalar factor
@@ -125,6 +143,16 @@ def newton_solve(
             reporting.print_solve_header(len(x), tol, max_iter)
         bar = reporting.new_progress_bar()
 
+    # Jacobian (already Ruiz-scaled) reused across iterations, with its row/
+    # column scale vectors — always assigned together so they can't drift out
+    # of sync. reuse_count tracks how many iterations the current Jacobian has
+    # been reused; prev_norm starts at inf so iteration 1 always refreshes.
+    J_scaled: np.ndarray | None = None
+    r: np.ndarray | None = None
+    c: np.ndarray | None = None
+    reuse_count = 0
+    prev_norm = float("inf")
+
     for iteration in range(1, max_iter + 1):
         F = residual_fn(x)
         residual_norm = float(np.linalg.norm(F))
@@ -135,9 +163,20 @@ def newton_solve(
                 )
             return x, iteration - 1, residual_norm
 
-        J = _finite_difference_jacobian(residual_fn, x, F)
-        r, c = _ruiz_equilibrate(J)
-        J_scaled = (J * r[:, None]) * c[None, :]
+        refresh = (
+            J_scaled is None
+            or max_jacobian_reuse <= 0
+            or reuse_count >= max_jacobian_reuse
+            or not (residual_norm <= jacobian_reuse_contraction * prev_norm)
+        )
+        if refresh:
+            J = _finite_difference_jacobian(residual_fn, x, F)
+            r, c = _ruiz_equilibrate(J)
+            J_scaled = (J * r[:, None]) * c[None, :]
+            reuse_count = 0
+        else:
+            reuse_count += 1
+
         try:
             y = np.linalg.solve(J_scaled, -(r * F))
         except np.linalg.LinAlgError as exc:
@@ -162,6 +201,7 @@ def newton_solve(
         x = x + step
         if clamp_fn is not None:
             x = clamp_fn(x)
+        prev_norm = residual_norm
 
     F = residual_fn(x)
     residual_norm = float(np.linalg.norm(F))
@@ -321,6 +361,7 @@ class Solver:
         dt: float | None = None,
         prev_diff_values: dict[str, float] | None = None,
         warm_start: "SolveResult | None" = None,
+        jacobian_reuse: int | None = None,
     ) -> SolveResult:
         """dt/prev_diff_values are advanced/internal knobs used by
         Network.solve_transient() — see its docstring and
@@ -346,6 +387,13 @@ class Solver:
         from thermowave.core.network import NetworkState
 
         network = self.network
+        # A component may have been mutated in place between solves (e.g. a
+        # Controller swapped for a PIDController, or a component's port set
+        # changed) without going through add_component/connect. Rebuild the
+        # topology-derived caches once here so this solve sees current
+        # topology; the rebuild is <0.01s and only happens per solve, not per
+        # residual evaluation.
+        network.invalidate_caches()
         fluid = network.fluid
         fixed_nodes = network._fixed_node_values()
         fixed_mdot = network._fixed_node_mdot()
@@ -374,6 +422,10 @@ class Solver:
                 raw_to_canonical[port_id] = network._canonical(port_id)
             for node_name in component.internal_nodes():
                 raw_to_canonical[node_name] = node_name
+        # unpack() runs once per residual evaluation (hundreds of thousands of
+        # times per transient run); freeze the mapping as a tuple of pairs so
+        # each call iterates a flat sequence instead of re-walking the dict.
+        raw_to_canonical_items = tuple(raw_to_canonical.items())
 
         # Differential unknowns: one per (component, key) declared via
         # differential_parameters() (e.g. a dynamic Shaft's rotor speed).
@@ -415,11 +467,11 @@ class Solver:
             for i, name in enumerate(param_names):
                 params[name] = x[offset + i]
 
-            node_P = {raw: canonical_P[canon] for raw, canon in raw_to_canonical.items()}
-            node_h = {raw: canonical_h[canon] for raw, canon in raw_to_canonical.items()}
+            node_P = {raw: canonical_P[canon] for raw, canon in raw_to_canonical_items}
+            node_h = {raw: canonical_h[canon] for raw, canon in raw_to_canonical_items}
             node_mdot = {
                 raw: canonical_mdot[canon]
-                for raw, canon in raw_to_canonical.items()
+                for raw, canon in raw_to_canonical_items
                 if canon in canonical_mdot
             }
             return node_P, node_h, node_mdot, params
@@ -684,6 +736,9 @@ class Solver:
             )
 
         try:
+            newton_kwargs = {}
+            if jacobian_reuse is not None:
+                newton_kwargs["max_jacobian_reuse"] = jacobian_reuse
             x_sol, iterations, residual_norm = newton_solve(
                 residual_vector,
                 x0,
@@ -694,6 +749,7 @@ class Solver:
                 step_limit_fn=step_limit,
                 verbose=verbose,
                 progress=progress,
+                **newton_kwargs,
             )
         except ConvergenceError as exc:
             # A bare "Singular Jacobian at iteration 12" says nothing about
