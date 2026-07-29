@@ -25,6 +25,11 @@ dependencies = [
     "networkx>=3.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/karimialii/ThermoWave"
+Repository = "https://github.com/karimialii/ThermoWave"
+Issues = "https://github.com/karimialii/ThermoWave/issues"
+
 [project.optional-dependencies]
 coolprop = ["CoolProp>=6.4"]
 cantera = ["cantera>=3.0"]

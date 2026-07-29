@@ -214,9 +214,6 @@ def test_manual_backward_euler_step_raises_level():
     P, h = 1.0e6, d.h0
     level_before = _level_from_ph(WATER, P, h)
 
-    h_g = WATER.saturated_vapor_enthalpy(P)
-    h_f = WATER.saturated_liquid_enthalpy(P)
-
     def deriv_at(P_cur, h_cur):
         state = _FakeState(
             fluid=WATER,

@@ -6,7 +6,7 @@ from thermowave.components.sink import Sink
 from thermowave.components.source import Source
 from thermowave.components.tank import Tank
 from thermowave.components.valve import Valve
-from thermowave.core.network import Network, NetworkState
+from thermowave.core.network import Network
 from thermowave.fluids.ideal_gas import IdealGasFluid
 
 AIR = IdealGasFluid(name="air", R=287.05, cp=1005.0)

@@ -3,6 +3,7 @@ import math
 import pytest
 
 from thermowave.fluids.ideal_gas import IdealGasFluid
+from thermowave.fluids.ideal_gas_mixture import IdealGasMixtureFluid
 
 AIR_R = 287.05  # J/(kg*K)
 AIR_CP = 1005.0  # J/(kg*K)
@@ -54,8 +55,6 @@ def test_ideal_gas_name_attribute():
     assert air.name == "air"
 
 
-from thermowave.fluids.ideal_gas_mixture import IdealGasMixtureFluid
-
 _R_UNIVERSAL = 8.314462618
 
 
@@ -105,8 +104,8 @@ def test_ideal_gas_mixture_extra_species_can_add_a_custom_entry():
         name="propane_air", composition={"C3H8": 0.05, "N2": 0.95},
         extra_species={"C3H8": (0.044097, 73.6)},
     )
-    M, cp_molar = 0.044097, 73.6
-    M_n2, cp_n2 = IdealGasMixtureFluid.SPECIES["N2"]
+    M = 0.044097
+    M_n2, _cp_n2 = IdealGasMixtureFluid.SPECIES["N2"]
     expected_R = 0.05 * (_R_UNIVERSAL / M) + 0.95 * (_R_UNIVERSAL / M_n2)
     assert math.isclose(fluid.R, expected_R, rel_tol=1e-9)
 
