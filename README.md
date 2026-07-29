@@ -704,6 +704,16 @@ section above).
 
 Where I'm taking this next, in roughly the order I plan to tackle it:
 
+- **A pluggable correlation hook on `MultiPassHeatExchanger` — landed.**
+  `arrangement="custom"` plus `correlation=Callable[[NTU, Cr], float]` plugs
+  in a user-supplied effectiveness correlation (plate-fin/finned-tube/
+  vendor-supplied) alongside the four built-in presets
+  (`src/thermowave/components/multi_pass_heat_exchanger.py`,
+  `_ARRANGEMENTS`), without needing a new named preset. It chains
+  `n_passes` the same same-direction way `"parallel"`/`"crossflow"` do (no
+  arrangement-specific directionality is assumed for an arbitrary
+  correlation); `correlation` is required when `arrangement="custom"` and
+  rejected otherwise.
 - **A first-class connection kind beyond `kind="flow"`**
   (`src/thermowave/core/network.py`, `_SUPPORTED_CONNECTION_KINDS`).
   Mechanical coupling (`Shaft`) and heat coupling (`Convection`/
@@ -713,11 +723,23 @@ Where I'm taking this next, in roughly the order I plan to tackle it:
   flow/mechanical/heat/electrical domains, so a new coupling type can plug
   into the existing graph-traversal and reporting machinery instead of
   needing its own component class.
-- **Variable-geometry turbomachinery maps.**
-  `CharacteristicMap` (`src/thermowave/maps/characteristic_map.py`)
-  currently only reads single-angle maps — the corrected-flow/PR/eta
-  interpolation already generalizes, I just haven't written the
-  multi-angle-block file format support yet for real VGV/VGT hardware.
+- **Variable-geometry turbomachinery maps — landed.**
+  `CharacteristicMap` (`src/thermowave/maps/characteristic_map.py`) now
+  parses every `"Angle"` block in a section, not just the first, and
+  `pressure_ratio(A, B, angle=)`/`efficiency(A, B, angle=)` interpolate
+  across angle the same bracket-and-blend way they already interpolate
+  across speed: bracket the two nearest angle blocks, run the existing
+  speed/choke-fraction interpolation independently against each, then blend
+  linearly by angle fraction. `angle` defaults to 0.0 and is inert for a
+  single-angle map regardless of what angle its one block is tagged with,
+  so `Compressor`/`Turbine` (which don't pass `angle=` yet) are unaffected.
+  `mid_speed()`/`speed_lines()` gained a matching `angle=` (selecting the
+  nearest block rather than blending, since a Newton guess or a plot line
+  wants one representative curve, not an interpolated one), and a new
+  `angles()` lists a map's angle blocks. See `sample_maps/` for a synthetic
+  3-angle VGV compressor map (`compressor_vgv_generic.cop`) alongside
+  relocated single-angle compressor/turbine/generator samples (previously
+  loose files at the repo root).
 - **A pluggable correlation hook on `MultiPassHeatExchanger`.**
   It's closed over 4 built-in arrangements today
   (`src/thermowave/components/multi_pass_heat_exchanger.py`,
