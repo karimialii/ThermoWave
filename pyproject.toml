@@ -34,7 +34,7 @@ Issues = "https://github.com/karimialii/ThermoWave/issues"
 coolprop = ["CoolProp>=6.4"]
 cantera = ["cantera>=3.0"]
 plot = ["matplotlib>=3.7"]
-dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.1", "mypy>=1.5"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.15,<0.16", "mypy>=1.5"]
 full = ["thermowave[coolprop,cantera,plot,dev]"]
 
 [tool.setuptools.packages.find]
