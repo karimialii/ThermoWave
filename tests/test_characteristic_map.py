@@ -177,3 +177,80 @@ def test_speeds_outside_the_map_range_use_the_nearest_line_directly():
     # align against, so the nearest line is read at the raw B.
     assert math.isclose(cmap.pressure_ratio(10.0, 2.0), 2.2, rel_tol=1e-9)
     assert math.isclose(cmap.pressure_ratio(99.0, 4.0), 3.2, rel_tol=1e-9)
+
+
+_VGV_MAP_PATH = "tests/fixtures/vgv_compressor_map.cop"
+
+
+def test_single_angle_map_ignores_angle_argument():
+    # A single-angle map (its one block tagged "Angle 0") should give the
+    # same answer at any angle -- angle only matters once there's a second
+    # block to blend against.
+    cmap = CharacteristicMap.from_file(_MAP_PATH)
+    A, B = cmap.mid_speed(), 1.5
+    reference = cmap.pressure_ratio(A, B)
+    for angle in (-10.0, 0.0, 10.0, 999.0):
+        assert math.isclose(cmap.pressure_ratio(A, B, angle=angle), reference)
+
+
+def test_vgv_map_parses_all_three_angle_blocks():
+    cmap = CharacteristicMap.from_file(_VGV_MAP_PATH)
+    assert cmap.angles() == [-10.0, 0.0, 10.0]
+
+
+_VGV_SINGLE_ANGLE_PR_BLOCKS = {
+    -10.0: """          50
+           1            2            3   -999999999
+         1.8          2.7          2.2   -999999999
+          70
+           1            2            3   -999999999
+         2.7          3.6          3.1   -999999999
+""",
+    0.0: """          50
+           1            2            3   -999999999
+         2.0          3.0          2.5   -999999999
+          70
+           1            2            3   -999999999
+         3.0          4.0          3.5   -999999999
+""",
+    10.0: """          50
+           1            2            3   -999999999
+         2.2          3.3          2.8   -999999999
+          70
+           1            2            3   -999999999
+         3.3          4.4          3.9   -999999999
+""",
+}
+
+
+def test_vgv_map_at_exact_angle_matches_that_blocks_own_value():
+    # Each angle block's own pressure-ratio surface, standing alone as a
+    # single-angle map (via the existing _map_text() helper), should match
+    # exactly what the multi-angle map returns when queried at that same
+    # angle -- confirms the blend reduces to exactly that block rather than
+    # approximating it.
+    cmap = CharacteristicMap.from_file(_VGV_MAP_PATH)
+    A = cmap.mid_speed(angle=0.0)
+    for angle, pr_block in _VGV_SINGLE_ANGLE_PR_BLOCKS.items():
+        direct = CharacteristicMap.from_text(_map_text(pr_block)).pressure_ratio(A, 1.5)
+        assert math.isclose(cmap.pressure_ratio(A, 1.5, angle=angle), direct, rel_tol=1e-9)
+
+
+def test_vgv_map_between_angles_is_between_the_two_bracketing_blocks():
+    cmap = CharacteristicMap.from_file(_VGV_MAP_PATH)
+    A = cmap.mid_speed(angle=0.0)
+    low = cmap.pressure_ratio(A, 1.5, angle=0.0)
+    high = cmap.pressure_ratio(A, 1.5, angle=10.0)
+    mid = cmap.pressure_ratio(A, 1.5, angle=5.0)
+    assert min(low, high) < mid < max(low, high)
+
+
+def test_vgv_map_outside_angle_range_clamps_to_nearest_block():
+    cmap = CharacteristicMap.from_file(_VGV_MAP_PATH)
+    A = cmap.mid_speed(angle=0.0)
+    below = cmap.pressure_ratio(A, 1.5, angle=-999.0)
+    at_min = cmap.pressure_ratio(A, 1.5, angle=-10.0)
+    above = cmap.pressure_ratio(A, 1.5, angle=999.0)
+    at_max = cmap.pressure_ratio(A, 1.5, angle=10.0)
+    assert math.isclose(below, at_min, rel_tol=1e-9)
+    assert math.isclose(above, at_max, rel_tol=1e-9)

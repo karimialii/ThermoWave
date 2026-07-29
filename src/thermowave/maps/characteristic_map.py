@@ -36,9 +36,17 @@ class CharacteristicMap:
     so C is read here as the standard P_out/P_in ratio, trusting the data
     and the conversion-factor line over what looks like a header typo.)
 
-    Only supports single-angle maps (both known example files have exactly
-    one "Angle 0" block per section); a variable-geometry map with multiple
-    angle blocks isn't handled.
+    Variable-geometry maps are supported: a section may have several "Angle"
+    blocks (one per vane/nozzle angle), each a complete set of iso-speed
+    curves like the single-angle case. `pressure_ratio()`/`efficiency()`
+    take an optional `angle=` (defaulting to 0.0, transparent for a
+    single-angle map regardless of what angle its one block is actually
+    tagged with) and interpolate across angle the same way they already
+    interpolate across speed: bracket the two nearest angle blocks, run the
+    existing speed/choke-fraction interpolation independently against each,
+    then blend the two results linearly by angle fraction. Outside the map's
+    angle range (or for a single-angle map) the nearest/only angle block is
+    used directly, unchanged.
 
     The file itself specifies four conversion factors (A_fact for speed,
     B_fact for mass flow, C_fact for pressure ratio, E_fact for efficiency)
@@ -49,9 +57,19 @@ class CharacteristicMap:
     value, and passing nothing at all reproduces the file exactly as before.
     """
 
-    def __init__(self, pr_lines: list[_SpeedLine], eff_lines: list[_SpeedLine]):
-        self._pr_lines = sorted(pr_lines, key=lambda line: line.speed)
-        self._eff_lines = sorted(eff_lines, key=lambda line: line.speed)
+    def __init__(
+        self,
+        pr_blocks: dict[float, list[_SpeedLine]],
+        eff_blocks: dict[float, list[_SpeedLine]],
+    ):
+        self._pr_blocks = {
+            angle: sorted(lines, key=lambda line: line.speed)
+            for angle, lines in pr_blocks.items()
+        }
+        self._eff_blocks = {
+            angle: sorted(lines, key=lambda line: line.speed)
+            for angle, lines in eff_blocks.items()
+        }
 
     @classmethod
     def from_file(
@@ -73,51 +91,65 @@ class CharacteristicMap:
                 )
             factors.update(factor_overrides)
 
-        pr_lines = _parse_section(
+        pr_blocks = _parse_section(
             text,
             _PR_SECTION_HEADER,
             a_fact=factors["A_fact"],
             b_fact=factors["B_fact"],
             y_fact=factors["C_fact"],
         )
-        eff_lines = _parse_section(
+        eff_blocks = _parse_section(
             text,
             _EFF_SECTION_HEADER,
             a_fact=factors["A_fact"],
             b_fact=factors["B_fact"],
             y_fact=factors["E_fact"],
         )
-        return cls(pr_lines, eff_lines)
+        return cls(pr_blocks, eff_blocks)
 
-    def pressure_ratio(self, A: float, B: float) -> float:
-        """Interpolated pressure ratio at corrected speed A, corrected mass flow B."""
-        return _interpolate(self._pr_lines, A, B)
+    def pressure_ratio(self, A: float, B: float, angle: float = 0.0) -> float:
+        """Interpolated pressure ratio at corrected speed A, corrected mass
+        flow B, and (for a variable-geometry map) vane/nozzle angle. angle is
+        ignored when the map has only one angle block (the default 0.0 is
+        transparent regardless of what angle that one block is tagged with)."""
+        return _interpolate_angle(self._pr_blocks, A, B, angle)
 
-    def efficiency(self, A: float, B: float) -> float:
-        """Interpolated efficiency (fraction) at corrected speed A, mass flow B."""
-        return _interpolate(self._eff_lines, A, B)
+    def efficiency(self, A: float, B: float, angle: float = 0.0) -> float:
+        """Interpolated efficiency (fraction) at corrected speed A, mass flow
+        B, and (for a variable-geometry map) vane/nozzle angle. Same angle
+        semantics as pressure_ratio()."""
+        return _interpolate_angle(self._eff_blocks, A, B, angle)
 
-    def mid_speed(self) -> float:
-        """Midpoint of the map's corrected-speed range A — a reasonable Newton
-        initial guess when speed is solved for instead of given directly."""
-        speeds = [line.speed for line in self._pr_lines]
+    def mid_speed(self, angle: float = 0.0) -> float:
+        """Midpoint of the corrected-speed range A of the block nearest
+        `angle` — a reasonable Newton initial guess when speed is solved for
+        instead of given directly."""
+        lines = _nearest_block(self._pr_blocks, angle)
+        speeds = [line.speed for line in lines]
         return (min(speeds) + max(speeds)) / 2.0
 
     def speed_lines(
-        self, kind: str
+        self, kind: str, angle: float = 0.0
     ) -> list[tuple[float, list[float], list[float]]]:
         """Raw iso-speed curves for plotting: one (speed, mass_flow, value)
-        tuple per corrected speed, sorted by speed. kind is "pressure_ratio"
-        or "efficiency", selecting which section's curves to return."""
+        tuple per corrected speed, sorted by speed, from the angle block
+        nearest `angle`. kind is "pressure_ratio" or "efficiency", selecting
+        which section's curves to return."""
         if kind == "pressure_ratio":
-            lines = self._pr_lines
+            blocks = self._pr_blocks
         elif kind == "efficiency":
-            lines = self._eff_lines
+            blocks = self._eff_blocks
         else:
             raise ValueError(
                 f"Unknown kind {kind!r}; expected 'pressure_ratio' or 'efficiency'"
             )
+        lines = _nearest_block(blocks, angle)
         return [(line.speed, line.mass_flow, line.value) for line in lines]
+
+    def angles(self) -> list[float]:
+        """Sorted list of vane/nozzle angles this map has blocks for — a
+        single-angle map returns a single-element list."""
+        return sorted(self._pr_blocks)
 
 
 def _parse_conversion_factors(text: str) -> dict[str, float]:
@@ -132,7 +164,7 @@ def _parse_conversion_factors(text: str) -> dict[str, float]:
 
 def _parse_section(
     text: str, section_header: str, a_fact: float, b_fact: float, y_fact: float
-) -> list[_SpeedLine]:
+) -> dict[float, list[_SpeedLine]]:
     lines = text.splitlines()
     try:
         start = next(i for i, line in enumerate(lines) if section_header in line)
@@ -142,20 +174,31 @@ def _parse_section(
     i = start + 1
     while "Angle" not in lines[i]:
         i += 1
-    i += 1  # past the "0  Angle" line
 
-    speed_lines: list[_SpeedLine] = []
+    blocks: dict[float, list[_SpeedLine]] = {}
     while True:
-        stripped = lines[i].strip()
-        if stripped.startswith(str(int(_SENTINEL))):
-            break
-        speed = float(stripped) * a_fact
-        mass_flow = _parse_row(lines[i + 1], b_fact)
-        value = _parse_row(lines[i + 2], y_fact)
-        speed_lines.append(_SpeedLine(speed=speed, mass_flow=mass_flow, value=value))
-        i += 3
+        angle = float(lines[i].strip().split()[0])
+        i += 1  # past the "<angle>  Angle" line
 
-    return speed_lines
+        speed_lines: list[_SpeedLine] = []
+        while True:
+            stripped = lines[i].strip()
+            if stripped.startswith(str(int(_SENTINEL))):
+                break
+            speed = float(stripped) * a_fact
+            mass_flow = _parse_row(lines[i + 1], b_fact)
+            value = _parse_row(lines[i + 2], y_fact)
+            speed_lines.append(_SpeedLine(speed=speed, mass_flow=mass_flow, value=value))
+            i += 3
+        blocks[angle] = speed_lines
+
+        i += 1  # past "-999999999 *** End of angle <angle>"
+        if "Terminator" in lines[i]:
+            break
+        while "Angle" not in lines[i]:  # blank/comment lines between blocks, if any
+            i += 1
+
+    return blocks
 
 
 def _parse_row(line: str, fact: float) -> list[float]:
@@ -166,6 +209,47 @@ def _parse_row(line: str, fact: float) -> list[float]:
             break
         values.append(value * fact)
     return values
+
+
+def _nearest_block(
+    blocks: dict[float, list[_SpeedLine]], angle: float
+) -> list[_SpeedLine]:
+    """The block whose own angle is closest to `angle` (clamped at the ends)
+    -- used where a single representative curve set is wanted (mid_speed(),
+    speed_lines()), as opposed to _interpolate_angle()'s blend across two
+    bracketing blocks."""
+    angles = sorted(blocks)
+    if angle <= angles[0]:
+        return blocks[angles[0]]
+    if angle >= angles[-1]:
+        return blocks[angles[-1]]
+    closest = min(angles, key=lambda a: abs(a - angle))
+    return blocks[closest]
+
+
+def _interpolate_angle(
+    blocks: dict[float, list[_SpeedLine]], A: float, B: float, angle: float
+) -> float:
+    """Interpolate across vane/nozzle angle blocks at (A, B), same bracket-
+    and-blend pattern as _interpolate()'s speed bracketing: run the existing
+    speed/choke-fraction interpolation independently against each of the two
+    bracketing angle blocks, then blend the two results linearly by angle
+    fraction. A single-angle map (or angle outside the map's angle range)
+    uses the nearest/only block directly, unchanged."""
+    angles = sorted(blocks)
+    if len(angles) == 1 or angle <= angles[0]:
+        return _interpolate(blocks[angles[0]], A, B)
+    if angle >= angles[-1]:
+        return _interpolate(blocks[angles[-1]], A, B)
+
+    for lower, upper in zip(angles, angles[1:]):
+        if lower <= angle <= upper:
+            weight = (angle - lower) / (upper - lower)
+            y_lower = _interpolate(blocks[lower], A, B)
+            y_upper = _interpolate(blocks[upper], A, B)
+            return y_lower + weight * (y_upper - y_lower)
+
+    raise AssertionError("unreachable: angle within the map's overall angle range")
 
 
 def _interpolate(speed_lines: list[_SpeedLine], A: float, B: float) -> float:

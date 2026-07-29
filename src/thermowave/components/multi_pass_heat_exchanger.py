@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Optional
 
 from thermowave.components.base_component import BaseComponent
 
@@ -12,7 +12,7 @@ _MIN_C = 1.0e-9  # kg/s * J/(kg K), floor to avoid divide-by-zero if a side has 
 _C_SMOOTHING_EPS = 0.002  # kg/s * J/(kg K), smoothing width for _smooth_min's kink
 _MIN_MDOT = 1.0e-9  # kg/s, floor for the Q/mdot energy-residual divisions below
 
-_ARRANGEMENTS = ("counterflow", "parallel", "crossflow", "shell_and_tube")
+_ARRANGEMENTS = ("counterflow", "parallel", "crossflow", "shell_and_tube", "custom")
 
 
 class MultiPassHeatExchanger(BaseComponent):
@@ -78,6 +78,17 @@ class MultiPassHeatExchanger(BaseComponent):
     reversal is captured analytically by the formula, not modeled as a
     physical node chain) — see internal_nodes().
 
+    "custom" plugs in a user-supplied effectiveness correlation instead of one
+    of the three built-in staged arrangements above — pass
+    `correlation=Callable[[NTU, Cr], float]` (same (NTU, Cr) -> effectiveness
+    signature as `_effectiveness()`) for a plate-fin/finned-tube/vendor
+    correlation without adding a new named preset here. It chains n_passes
+    the same same-direction way "parallel"/"crossflow" do (no arrangement-
+    specific directionality is assumed for an arbitrary correlation) and
+    splits PR/UA the same per-pass way as the other three staged
+    arrangements. `correlation` is required when `arrangement="custom"` and
+    must be omitted otherwise.
+
     Each side's pressure drop is still a fixed ratio (PR_hot/PR_cold, same
     style as SimpleHeatExchanger) — for "counterflow"/"parallel"/
     "crossflow", split evenly in log space across passes
@@ -95,6 +106,7 @@ class MultiPassHeatExchanger(BaseComponent):
         PR_cold: float,
         n_passes: int = 1,
         arrangement: str = "counterflow",
+        correlation: Optional[Callable[[float, float], float]] = None,
     ):
         if UA <= 0:
             raise ValueError(f"MultiPassHeatExchanger {name!r}: UA must be > 0, got {UA}")
@@ -113,12 +125,23 @@ class MultiPassHeatExchanger(BaseComponent):
                 f"MultiPassHeatExchanger {name!r}: arrangement must be one of "
                 f"{_ARRANGEMENTS}, got {arrangement!r}"
             )
+        if arrangement == "custom" and correlation is None:
+            raise ValueError(
+                f"MultiPassHeatExchanger {name!r}: correlation is required when "
+                f"arrangement='custom'"
+            )
+        if arrangement != "custom" and correlation is not None:
+            raise ValueError(
+                f"MultiPassHeatExchanger {name!r}: correlation is only used when "
+                f"arrangement='custom', got arrangement={arrangement!r}"
+            )
         self.name = name
         self.UA = UA
         self.PR_hot = PR_hot
         self.PR_cold = PR_cold
         self.n_passes = n_passes
         self.arrangement = arrangement
+        self.correlation = correlation
         self._hot_in_node = f"{name}.hot_in"
         self._hot_out_node = f"{name}.hot_out"
         self._cold_in_node = f"{name}.cold_in"
@@ -183,6 +206,9 @@ class MultiPassHeatExchanger(BaseComponent):
             return (1.0 - exp_term) / (1.0 - Cr * exp_term)
         if self.arrangement == "parallel":
             return (1.0 - math.exp(-NTU * (1.0 + Cr))) / (1.0 + Cr)
+        if self.arrangement == "custom":
+            assert self.correlation is not None  # enforced in __init__
+            return self.correlation(NTU, Cr)
         # crossflow, both fluids unmixed (Incropera's correlation)
         if Cr < 1.0e-9:
             return 1.0 - math.exp(-NTU)

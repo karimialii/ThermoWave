@@ -43,11 +43,27 @@ def test_multi_pass_hx_internal_nodes_scale_with_n_passes():
     assert len(hx3.internal_nodes()) == 4  # 2 mid-nodes per stream, 2 streams
 
 
-def _run(n_passes, arrangement="counterflow", UA=800.0):
+def test_multi_pass_hx_custom_arrangement_requires_correlation():
+    with pytest.raises(ValueError, match="correlation is required"):
+        MultiPassHeatExchanger(
+            name="hx1", UA=500.0, PR_hot=0.98, PR_cold=0.97, arrangement="custom"
+        )
+
+
+def test_multi_pass_hx_correlation_rejected_outside_custom_arrangement():
+    with pytest.raises(ValueError, match="correlation is only used"):
+        MultiPassHeatExchanger(
+            name="hx1", UA=500.0, PR_hot=0.98, PR_cold=0.97,
+            arrangement="counterflow", correlation=lambda ntu, cr: 0.5,
+        )
+
+
+def _run(n_passes, arrangement="counterflow", UA=800.0, correlation=None):
     hot_src = Source(name="hsrc", P=110000.0, T=800.0, mdot=0.4)
     cold_src = Source(name="csrc", P=300000.0, T=400.0, mdot=0.4)
     hx = MultiPassHeatExchanger(
         name="hx", UA=UA, PR_hot=0.98, PR_cold=0.97, n_passes=n_passes, arrangement=arrangement,
+        correlation=correlation,
     )
     hot_snk = Sink(name="hsnk")
     cold_snk = Sink(name="csnk")
@@ -92,6 +108,26 @@ def test_multi_pass_hx_parallel_effectiveness_is_invariant_to_n_passes():
     _, metrics_4 = _run(n_passes=4, arrangement="parallel")
     assert math.isclose(
         metrics_1["effectiveness [-]"], metrics_4["effectiveness [-]"], rel_tol=1e-6
+    )
+
+
+def test_multi_pass_hx_custom_correlation_matches_equivalent_builtin():
+    # A custom correlation reimplementing the parallel-flow formula should
+    # reproduce "parallel"'s own result exactly -- confirms the "custom"
+    # dispatch and its same-direction pass chaining behave like the
+    # built-in arrangement they're mimicking.
+    def parallel_like(ntu, cr):
+        return (1.0 - math.exp(-ntu * (1.0 + cr))) / (1.0 + cr)
+
+    _, metrics_builtin = _run(n_passes=1, arrangement="parallel")
+    _, metrics_custom = _run(n_passes=1, arrangement="custom", correlation=parallel_like)
+    assert math.isclose(
+        metrics_builtin["effectiveness [-]"], metrics_custom["effectiveness [-]"], rel_tol=1e-9
+    )
+
+    _, metrics_custom_4 = _run(n_passes=4, arrangement="custom", correlation=parallel_like)
+    assert math.isclose(
+        metrics_builtin["effectiveness [-]"], metrics_custom_4["effectiveness [-]"], rel_tol=1e-6
     )
 
 
