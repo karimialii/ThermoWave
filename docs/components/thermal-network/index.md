@@ -44,7 +44,7 @@ from thermowave.components import Turbine, ThermalMass, Convection
 turb = Turbine(name="turb", map_path="turbine.tur", N=65_000.0)
 casing = ThermalMass(name="turb_casing", thermal_capacitance=200.0, T0=300.0)
 conv = Convection(name="turb_conv", a=(turb, "out"), b=casing, h=50.0, A=0.3)
-turb.heat_path = conv
+turb.set(heat_path=conv)      # or plain assignment, turb.heat_path = conv
 
 network.add_heat_path(conv)   # registers the path and derives casing's sign
 ```

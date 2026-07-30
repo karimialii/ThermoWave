@@ -52,6 +52,30 @@ Every node carries:
   node (see *Composition propagation* below); the overwhelming majority of
   nodes just inherit the network's one default fluid.
 
+### Configuring parameters
+
+Constructor kwargs are fine for the parameters you set at creation time, but
+a component's tunable parameters can also be set afterwards — including
+after it's already been added to a `Network` — via `component.set(**kwargs)`
+(`BaseComponent.set()`, inherited by every component):
+
+```python
+turb = Turbine(name="turb", map_path="T100 Turb.tur")
+network.add_component(turb)
+
+turb.set(N=65000.0)
+```
+
+This is useful once a component has several parameters: setting them one
+line at a time (rather than all packed into one constructor call) makes it
+easy to scan a script later for exactly what was configured. `set()`
+validates keys against attributes that already exist on the instance, so a
+typo raises `AttributeError` instead of silently creating a new attribute,
+and it auto-invalidates the owning network's caches if the component has
+already been added. Plain attribute assignment (`turb.N = 65000.0`) still
+works identically — `set()` is a validated, typo-safe spelling of the same
+thing, not a replacement mechanism.
+
 ### Residual equations
 
 `residuals(state) -> list[float]` is the one method every component must
