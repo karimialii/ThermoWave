@@ -451,10 +451,11 @@ existed) that, when set, actually perturbs that component's own energy
 residual — real two-way coupling, not just reporting. Since a path needs
 `(component, "out")` as one of its own endpoints, it can only be built
 *after* that component already exists, and the component needs to know
-about the path too (for its residual) — so wiring one in is a two-step,
-plain-attribute-assignment process, the same pattern `Shaft`/`Generator`
-already use for referencing components built earlier, extended one step
-further because both endpoints need each other here:
+about the path too (for its residual) — so wiring one in is a two-step
+configuration process (via `.set()`, or plain attribute assignment — both
+work identically), the same pattern `Shaft`/`Generator` already use for
+referencing components built earlier, extended one step further because
+both endpoints need each other here:
 
 ```python
 turb = Turbine(name="turb", map_path="T100 Turb.tur", N=65000.0)
@@ -462,8 +463,8 @@ casing = ThermalMass(name="turb_casing", thermal_capacitance=200.0, T0=300.0)
 conv = Convection(name="turb_conv", a=(turb, "out"), b=casing, h=50.0, A=0.3)
 to_ambient = Convection(name="turb_ambient", a=casing, b=288.15, h=10.0, A=1.0)
 
-turb.set(heat_path=conv)                                 # or plain assignment, turb.heat_path = conv
-casing.heat_sources = [(conv, 1.0), (to_ambient, -1.0)]   # casing gains conv's Q, loses to_ambient's
+turb.set(heat_path=conv)
+casing.set(heat_sources=[(conv, 1.0), (to_ambient, -1.0)])  # casing gains conv's Q, loses to_ambient's
 ```
 
 See `tests/test_heat_transfer_integration.py` for the full picture: a
