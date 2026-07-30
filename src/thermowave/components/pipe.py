@@ -4,6 +4,7 @@ import math
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
+from thermowave.core.settings import settings
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -12,6 +13,11 @@ _MIN_MDOT = 1.0e-9  # kg/s, floor for heat_loss/mdot below — a Newton iterate
 # that clamps a free mdot near zero (Solver.MDOT_MIN) would otherwise blow up
 # this division; guess_outlet()'s own mdot argument gets the same floor since
 # it's called with the same kind of solver-propagated guess.
+
+_MIN_RE = 1.0e-9  # floor for Reynolds number below, same rationale as _MIN_MDOT
+_TRANSITION_RE = 2300.0  # laminar/turbulent switch — a hard switch (small kink
+# in the finite-difference Jacobian at this Re) is acceptable here rather than
+# a smoothed blend.
 
 
 class Pipe(BaseComponent):
@@ -22,6 +28,22 @@ class Pipe(BaseComponent):
     computed from the pipe's own (constant, non-branching) inlet mdot. A
     single mass-conservation residual (outlet mdot == inlet mdot) ties the
     outlet's mdot unknown, if free, back to the inlet's.
+
+    The Darcy friction factor is computed from roughness and Reynolds number
+    by default (re-evaluated fresh every residual call, since Re depends on
+    mdot): f = 64/Re below Re=2300 (laminar), or a roughness-dependent
+    turbulent correlation above it — Haaland (explicit) or Colebrook-White
+    (implicit fixed-point, seeded from the Haaland value), chosen via
+    thermowave.core.settings.friction_correlation ("haaland" by default).
+    mu is the fluid's dynamic viscosity [Pa*s], given directly as a constant
+    since no BaseFluid model in this codebase exposes viscosity (the same
+    trust level Turbine/Compressor's gamma already has).
+
+    f: give it directly to skip the roughness/Re calculation entirely and use
+    a fixed friction factor instead — e.g. f=0.0 for a frictionless duct
+    (a common way to model a heater/combustor segment via heat_loss alone).
+    Leave it None (the default) to use roughness/mu; roughness and mu are
+    then both required.
     """
 
     def __init__(
@@ -29,19 +51,42 @@ class Pipe(BaseComponent):
         name: str,
         L: float,
         D: float,
-        f: float,
+        roughness: float | None = None,
+        mu: float | None = None,
+        f: float | None = None,
         n_elem: int = 1,
         heat_loss: float | None = None,
     ):
+        if f is None and (roughness is None or mu is None):
+            raise ValueError(
+                f"Pipe {name!r}: give f directly, or both roughness and mu "
+                "to compute it from Reynolds number"
+            )
         self.name = name
         self.L = L
         self.D = D
+        self.roughness = roughness
+        self.mu = mu
         self.f = f
         self.n_elem = n_elem
         self.heat_loss = heat_loss
         self._inlet_node = f"{name}.in"
         self._outlet_node = f"{name}.out"
         self._area = math.pi * D**2 / 4
+
+    def _friction_factor(self, rho: float, v: float) -> float:
+        if self.f is not None:
+            return self.f
+        Re = max(rho * abs(v) * self.D / self.mu, _MIN_RE)
+        if Re < _TRANSITION_RE:
+            return 64.0 / Re
+        rel_roughness = self.roughness / self.D
+        x = -1.8 * math.log10((rel_roughness / 3.7) ** 1.11 + 6.9 / Re)
+        if settings.resolve_friction_correlation() == "haaland":
+            return 1.0 / x**2
+        for _ in range(15):
+            x = -2.0 * math.log10(rel_roughness / 3.7 + 2.51 * x / Re)
+        return 1.0 / x**2
 
     def ports(self) -> dict[str, str]:
         return {"in": self._inlet_node, "out": self._outlet_node}
@@ -74,7 +119,8 @@ class Pipe(BaseComponent):
             P_out, h_out = state.node(nodes[i + 1])
             rho = fluid.density_ph(P_in, h_in)
             v = mdot / (rho * self._area)
-            dp_friction = self.f * (elem_L / self.D) * (rho * v**2 / 2)
+            f = self._friction_factor(rho, v)
+            dp_friction = f * (elem_L / self.D) * (rho * v**2 / 2)
             out.append(P_in - P_out - dp_friction)
             out.append(h_in - h_out - q_elem / max(mdot, _MIN_MDOT))
         out.append(state.mdot(self._outlet_node) - mdot)

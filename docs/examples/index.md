@@ -18,7 +18,7 @@ air = IdealGasFluid(name="air", R=287.05, cp=1005.0)
 net = Network(fluid=air)
 
 src = Source(name="src", P=200_000.0, T=300.0, mdot=1.0)
-pipe = Pipe(name="pipe", L=10.0, D=0.1, f=0.02)
+pipe = Pipe(name="pipe", L=10.0, D=0.1, roughness=4.5e-5, mu=1.8e-5)
 sink = Sink(name="sink")
 
 for c in (src, pipe, sink):

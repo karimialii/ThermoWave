@@ -19,6 +19,7 @@ class Settings:
     def __init__(self) -> None:
         self.pressure_unit = "Pa"
         self.temperature_unit = "K"
+        self.friction_correlation = "haaland"
 
     def pressure_to_si(self, value: float) -> float:
         if self.pressure_unit not in _PRESSURE_TO_PA:
@@ -39,6 +40,20 @@ class Settings:
         if self.temperature_unit == "C":
             return value + 273.15
         raise ValueError(f"Unsupported temperature_unit: {self.temperature_unit!r}")
+
+    def resolve_friction_correlation(self) -> str:
+        """Validated turbulent-regime friction correlation for Pipe's roughness-based
+        friction factor: "haaland" (explicit) or "colebrook" (implicit fixed-point).
+        Read live at every Pipe.residuals() call, not just at construction time —
+        unlike pressure_unit/temperature_unit, this isn't a conversion applied once
+        at Source's __init__, it picks which formula Pipe evaluates every Newton
+        iteration.
+        """
+        if self.friction_correlation not in ("haaland", "colebrook"):
+            raise ValueError(
+                f"Unsupported friction_correlation: {self.friction_correlation!r}"
+            )
+        return self.friction_correlation
 
 
 settings = Settings()
