@@ -60,7 +60,8 @@ class SimpleCombustor(BaseComponent):
     subtracted directly here with no /mdot division. Since the path needs
     (self, "out") as one of its own endpoints, it can only be built after
     this SimpleCombustor already exists — pass it here if you have it, or
-    just set combustor.heat_path = path afterwards.
+    just set it afterwards via combustor.set(heat_path=path) (or direct
+    attribute assignment; both work identically).
     """
 
     def __init__(

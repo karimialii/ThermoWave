@@ -52,9 +52,9 @@ class Compressor(BaseComponent):
     ...). None (the default) means fully adiabatic, unchanged from before
     this existed. Since the path needs (self, "out") as one of its own
     endpoints, it can only be built after this Compressor already exists —
-    pass it here if you have it, or just set comp.heat_path = path
-    afterwards; both work identically, residuals() reads the attribute
-    either way. Q(state) > 0 (heat leaving the fluid) reduces T_out below
+    pass it here if you have it, or just set it afterwards via
+    comp.set(heat_path=path) (or direct attribute assignment; both work
+    identically, residuals() reads the attribute either way). Q(state) > 0 (heat leaving the fluid) reduces T_out below
     what the map/efficiency alone would give, same sign convention as
     Pipe's own heat_loss.
     """

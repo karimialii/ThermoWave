@@ -73,8 +73,9 @@ class Combustor(BaseComponent):
     h_out_target), so heat_path's Q(state) is added divided by the
     outlet's own expected mass flow. Since the path needs (self, "out")
     as one of its own endpoints, it can only be built after this Combustor
-    already exists — pass it here if you have it, or just set
-    combustor.heat_path = path afterwards.
+    already exists — pass it here if you have it, or just set it afterwards
+    via combustor.set(heat_path=path) (or direct attribute assignment; both
+    work identically).
     """
 
     def __init__(

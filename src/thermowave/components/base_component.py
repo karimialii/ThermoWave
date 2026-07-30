@@ -13,6 +13,31 @@ class BaseComponent(ABC):
 
     name: str
 
+    def set(self, **kwargs) -> "BaseComponent":
+        """Configure existing attributes by keyword, e.g. turb.set(efficiency=0.89).
+
+        Validates against attributes that already exist on the instance after
+        __init__ (typo protection) rather than a separately declared allow-list,
+        so every subclass gets this for free. Excludes `name` and any
+        `_`-prefixed attribute (internal bookkeeping, not a tunable parameter).
+        Safe to call at any point before solve()/solve_transient(), including
+        after the component has been added to a Network — it auto-invalidates
+        that network's caches the same way Network.invalidate_caches() does.
+        Does not re-run any constructor-time validation (e.g. Turbine's
+        gamma > 1 check); this is the same trust level as direct attribute
+        assignment, which already works identically and remains supported.
+        """
+        for key, value in kwargs.items():
+            if key.startswith("_") or key == "name" or not hasattr(self, key):
+                raise AttributeError(
+                    f"{type(self).__name__} {self.name!r} has no settable parameter {key!r}"
+                )
+            setattr(self, key, value)
+        network = getattr(self, "_network", None)
+        if network is not None:
+            network.invalidate_caches()
+        return self
+
     @abstractmethod
     def ports(self) -> dict[str, str]:
         """Named ports ('inlet'/'outlet'/etc.) -> this component's own port id.

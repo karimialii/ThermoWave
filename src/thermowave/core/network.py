@@ -209,6 +209,7 @@ class Network:
 
     def add_component(self, component: "BaseComponent") -> None:
         self.components.append(component)
+        component._network = self
         self._register_nodes(component)
 
     def _register_nodes(self, component: "BaseComponent") -> None:
