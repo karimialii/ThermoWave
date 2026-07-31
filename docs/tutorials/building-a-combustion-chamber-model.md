@@ -1,0 +1,280 @@
+# Building a 1D combustion-chamber model
+
+A recipe for the pattern real 1D combustor-network codes use: adiabatic
+combustion, then a discretized liner built from ordinary flow and thermal
+primitives — `Combustor`, `Pipe`, `Junction`, and a `Convection`/`Radiation`/
+`Conduction`/`ThermalMass` chain — rather than one purpose-built component.
+Worked example: a T100-class microturbine combustion chamber, split into a
+primary (root) air path and a dilution air path that mixes back in downstream.
+
+The shape:
+
+1. create the network and the boundary source
+2. split combustion air from dilution air
+3. the combustor (adiabatic flame)
+4. the discretized liner: hot-gas path, dilution path, wall rings
+5. wire the heat paths
+6. mix dilution air back in, and solve
+7. calibrate the primary/dilution split against measured data
+
+A runnable version of this is `tests/test_combustion_chamber_workflow.py`,
+which follows these steps verbatim so the guide can't drift from working
+code.
+
+> **Geometry disclaimer.** The fuel/air flow rates and the measured inlet/
+> outlet temperatures below are real operating-point data. The liner
+> **geometry** (diameter, length, wall thickness, material) is an
+> engineering estimate for a small can-combustor of this thermal duty — no
+> OEM T100 combustor geometry is publicly available. Swap in real numbers if
+> you have them; nothing here should be read as a sourced spec.
+
+---
+
+## 1. Network and boundary source
+
+```python
+from thermowave.core import Network
+from thermowave.fluids import CanteraFluid
+from thermowave.components import Source
+
+P_IN = 417_000.0             # 4.17 bar
+T_IN = 587.0 + 273.15        # 587 C, compressor discharge
+MDOT_AIR = 0.8                # kg/s, total air into the chamber
+MDOT_FUEL = 0.0068             # kg/s, 6.8 g/s CH4
+T_TARGET_OUT = 918.0 + 273.15  # 918 C, measured chamber exit
+
+air = CanteraFluid(name="air", mechanism="gri30.yaml", composition="O2:0.21,N2:0.79")
+network = Network(fluid=air)
+
+air_src = Source(name="air_src", P=P_IN, T=T_IN, mdot=MDOT_AIR)
+```
+
+Use `CanteraFluid`, not `IdealGasFluid`, if you want the combustor's reacted
+products to propagate downstream (see *Composition-aware fluid propagation*
+in the README) — every discretized liner station then sees the real product
+mixture's properties, not plain air's.
+
+## 2. Split combustion air from dilution air
+
+```python
+from thermowave.components import Junction
+
+F_PRIMARY = 0.166  # calibrated in step 7 -- start anywhere reasonable, e.g. 0.25
+
+splitter = Junction(
+    name="splitter", n_inlets=1, n_outlets=2,
+    split_fractions=[F_PRIMARY, 1.0 - F_PRIMARY],
+)
+```
+
+`Junction` with `n_inlets=1, n_outlets>1` is a pure splitter — `out0` becomes
+the primary (root) air into the combustor, `out1` the dilution air that
+bypasses the liner and rejoins downstream. Every outlet gets the *same*
+pressure as the inlet (no drop through the junction itself); it's the two
+downstream paths' own pressure drops that need to end up comparable — see
+the traps section below for what happens when they don't.
+
+## 3. The combustor
+
+```python
+from thermowave.components import Combustor
+
+comb = Combustor(
+    name="comb", PR=0.98, efficiency=1.0,
+    mdot_fuel=MDOT_FUEL, fuel="CH4", mechanism="gri30.yaml",
+)
+```
+
+`mdot_fuel` is given directly here (it's measured), not solved for. `efficiency=1.0`
+keeps the combustor itself fully adiabatic — the wall heat loss you actually
+care about is modeled explicitly by the liner in step 4/5, so leaving
+`efficiency` at 1.0 avoids double-counting that loss once as a combustor-level
+fudge factor and again as real `Convection`/`Radiation` to the liner.
+
+**A real limitation, stated plainly:** `Combustor` mixes `mdot_fuel` in at the
+*same* `T_in`/`P_in` as the air stream it's combusting with — there's no
+separate fuel port carrying the fuel's own upstream state (e.g. 8 bar) into
+the equilibrium calculation. If your fuel line's own pressure drop matters to
+you, model it as a disconnected `Source`→`Valve` purely for reporting; it
+won't feed back into the flame temperature here.
+
+## 4. The discretized liner
+
+```python
+from thermowave.components import Pipe, ThermalMass
+import math
+
+D_LINER = 0.10       # m, estimated
+L_LINER = 0.22       # m, estimated
+N_STATIONS = 3       # matching 3 rows of dilution holes
+L_SEG = L_LINER / N_STATIONS
+WALL_THICKNESS = 0.0015  # m, estimated
+D_ANNULUS = 0.13     # m, see the traps section for why this is NOT the
+                     # physical liner-to-casing gap width
+
+K_WALL, RHO_WALL, CP_WALL = 15.0, 8220.0, 500.0  # Hastelloy X, approximate
+
+A_RING = math.pi * D_LINER * L_SEG        # inner surface area per ring
+VOL_RING = math.pi * D_LINER * WALL_THICKNESS * L_SEG
+C_RING = RHO_WALL * CP_WALL * VOL_RING     # lumped m*cp per ring
+A_COND = math.pi * D_LINER * WALL_THICKNESS  # wall cross-section, axial conduction
+
+hotgas = [Pipe(name=f"hotgas{i}", L=L_SEG, D=D_LINER, f=0.02, n_elem=1) for i in range(N_STATIONS)]
+annulus = [Pipe(name=f"annulus{i}", L=L_SEG, D=D_ANNULUS, f=0.02, n_elem=1) for i in range(N_STATIONS)]
+liners = [ThermalMass(name=f"liner{i}", thermal_capacitance=C_RING, T0=T_IN) for i in range(N_STATIONS)]
+```
+
+Each station is a real component pair — `hotgas[i]` carries the reacting
+flow, `annulus[i]` carries the bypass air alongside it — not one `Pipe` with
+`n_elem=N`. That distinction matters: `Convection`/`Radiation` endpoints are
+`(component, port)` pairs resolved through `component.ports()`, which only
+exposes `"in"`/`"out"` — a multi-element `Pipe`'s internal nodes aren't
+addressable that way. `Pipe` also needs its own `heat_path` attribute to sit
+on a live heat path at all (as opposed to a fixed `heat_loss` scalar) — that
+support was added alongside this guide.
+
+## 5. Wire the heat paths
+
+```python
+for component in (air_src, splitter, comb, *hotgas, *annulus, *liners):
+    network.add_component(component)
+
+network.connect(air_src, "out", splitter, "in0")
+network.connect(splitter, "out0", comb, "in")
+network.connect(splitter, "out1", annulus[0], "in")
+network.connect(comb, "out", hotgas[0], "in")
+for i in range(N_STATIONS - 1):
+    network.connect(hotgas[i], "out", hotgas[i + 1], "in")
+    network.connect(annulus[i], "out", annulus[i + 1], "in")
+
+from thermowave.components import Conduction, Convection, Radiation
+
+for i in range(N_STATIONS):
+    network.add_heat_path(Radiation(name=f"rad{i}", a=(hotgas[i], "in"), b=liners[i], emissivity=0.7, A=A_RING))
+    network.add_heat_path(Convection(name=f"conv_hot{i}", a=(hotgas[i], "in"), b=liners[i], h=80.0, A=A_RING))
+    network.add_heat_path(Convection(name=f"conv_cold{i}", a=liners[i], b=(annulus[i], "in"), h=40.0, A=A_RING))
+for i in range(N_STATIONS - 1):
+    network.add_heat_path(Conduction(name=f"cond{i}", a=liners[i], b=liners[i + 1], k=K_WALL, A=A_COND, L=L_SEG))
+```
+
+Three paths land on each ring: flame radiation in, hot-gas convection in,
+and convection *out* to the cooler dilution air running alongside it — the
+real mechanism a liner wall is cooled by. `Conduction` between neighboring
+rings means a hot spot at one station bleeds into its neighbors instead of
+each ring being thermally isolated. `add_heat_path()` derives every sign
+automatically from which endpoint each path is attached to — see the
+gas-turbine guide's own heat-path section for the general mechanism.
+
+## 6. Mix dilution air back in, and solve
+
+```python
+from thermowave.components import Sink
+
+mixer = Junction(name="mixer", n_inlets=2, n_outlets=1)
+snk = Sink(name="snk")
+network.add_component(mixer)
+network.add_component(snk)
+
+network.connect(hotgas[-1], "out", mixer, "in0")
+network.connect(annulus[-1], "out", mixer, "in1")
+network.connect(mixer, "out0", snk, "in")
+
+assert network.check_wiring() == []
+result = network.solve(tol=1e-8, max_iter=800, damping=0.2)
+```
+
+`Sink(P=None)` (the default) is correct here: every pressure downstream of
+`air_src` is already fully determined by `comb.PR` and each `Pipe`'s own
+friction drop — there's no remaining pressure unknown needing a boundary
+value at the far end, unlike a map-based `Turbine`'s outlet.
+
+## 7. Calibrate the primary/dilution split
+
+Rather than guessing `F_PRIMARY`, bisect it against the two measured
+temperatures — the same continuation idea `OperatingSchedule.solve()` in the
+gas-turbine scripts uses, just for one scalar instead of a whole table:
+
+```python
+def exit_temperature(f_primary, warm_start=None):
+    net = build_network(f_primary)  # steps 1-6, wrapped in a function
+    result = net.solve(tol=1e-8, max_iter=800, damping=0.2, warm_start=warm_start)
+    state = result.state()
+    P_out, h_out = state.node("mixer.out0")
+    return state.fluid_at("mixer.out0").temperature_ph(P_out, h_out), result
+
+lo, hi = 0.16, 0.20
+warm = None
+for f in (0.30, 0.26, 0.22, 0.18, 0.16):   # walk down from an easy point first
+    _, warm = exit_temperature(f, warm)
+for _ in range(20):
+    mid = 0.5 * (lo + hi)
+    T_mid, warm = exit_temperature(mid, warm)
+    lo, hi = (mid, hi) if T_mid < T_TARGET_OUT else (lo, mid)
+    if abs(T_mid - T_TARGET_OUT) < 0.02:
+        break
+```
+
+This lands on `F_PRIMARY ≈ 0.166` for the numbers above (≈17% of the total
+air goes to the root, the rest is dilution) — a real, measured-data-derived
+number instead of an assumed split.
+
+---
+
+## Traps worth knowing before you debug them
+
+### A too-small annulus diameter looks like a convergence failure, not a sizing mistake
+
+Walking `F_PRIMARY` down from 0.20 originally failed to converge below
+about 0.18 — not slowly, but *stalled at the same residual norm* regardless
+of iteration budget or damping, which looks exactly like a genuine
+non-convergent wiring problem. It wasn't: `D_ANNULUS` was set to the
+liner-to-casing gap's physical width (0.02 m), and at low `F_PRIMARY` the
+annulus carries ~80% of 0.8 kg/s through that tiny cross-section — working
+out to roughly **1200 m/s**, hypersonic, in a component whose friction model
+assumes ordinary duct flow. `D_ANNULUS` needs to be sized as an *equivalent
+circular flow area* for a sane duct velocity (here, ~30 m/s), not as the
+literal physical gap — the same "use an equivalent diameter for a
+non-circular passage" trick as any duct hydraulics. A stalled-at-identical-
+residual failure that doesn't improve with more iterations or lower damping
+is a strong signal to check for exactly this kind of unphysical velocity
+before assuming the network's wiring is wrong.
+
+### Junction doesn't reconcile mismatched branch pressures
+
+`Junction`'s merge takes its reference pressure from the *first* inlet only
+(`in0`) and silently ignores whatever pressure `in1` actually arrived at —
+documented behavior, not a bug, but worth knowing before you rely on the two
+branches "meeting in the middle." Keep the hot-gas path's total pressure
+drop (`comb.PR` × 3 friction drops) and the dilution path's (3 friction
+drops alone) in the same ballpark by design, the way a real combustor's
+liner and annulus are sized to have comparable pressure loss — otherwise the
+mixer's reported exit pressure quietly reflects only one branch.
+
+### Liner temperatures come out far hotter than a real metal survives
+
+This model's rings settle in the 2400 K range at the calibrated operating
+point — well past any real liner alloy's limit. That's a real, expected
+consequence of what this model does and doesn't include: bulk `h`/`A`
+convection with no **film cooling** (the thin layer of cool air a real liner
+hugs its hot-side wall with, which drops the *local* gas temperature the
+wall actually sees, not just the bulk convective coefficient). Radiative
+heat scales as `T^4`, so at flame temperatures it dominates the wall's
+energy balance unless the cold-side conductance is far larger than the bulk
+values here. Treat this model as the right *mechanism* (radiation +
+convection + conduction, discretized station by station) demonstrated at
+teaching-model fidelity, not a liner life-prediction tool — a real film-
+cooling effectiveness factor (reducing the effective driving temperature the
+wall sees, not just raising `h`) is the standard fix if you need believable
+liner metal temperatures.
+
+---
+
+## Reading results
+
+```python
+state = result.state()
+P_out, h_out = state.node("mixer.out0")
+print(state.fluid_at("mixer.out0").temperature_ph(P_out, h_out))  # chamber exit T
+for liner in liners:
+    print(liner.name, state.param(f"{liner.name}.T"))             # per-station wall T
+```

@@ -2,7 +2,11 @@ import math
 
 import pytest
 
+from thermowave.components.heat_transfer import Convection, ThermalMass
 from thermowave.components.pipe import Pipe
+from thermowave.components.sink import Sink
+from thermowave.components.source import Source
+from thermowave.core.network import Network
 from thermowave.core.settings import settings
 from thermowave.fluids.ideal_gas import IdealGasFluid
 
@@ -116,3 +120,59 @@ def test_residuals_use_computed_friction_factor():
     assert math.isclose(
         momentum_residual, P_in - 190_000.0 - dp_expected, rel_tol=1e-9
     )
+
+
+def test_heat_path_none_matches_pre_existing_behavior():
+    # heat_path defaults to None; heat_loss_watts(None, ...) short-circuits
+    # to 0.0 without ever touching state, so this must reproduce the exact
+    # heat_loss-only residual every other test in this file already checks.
+    pipe = Pipe(name="p1", L=5.0, D=0.2, f=0.02, heat_loss=-1000.0)
+    state = _FakeState(
+        fluid=AIR, mdot=1.0,
+        node_values={"p1.in": (200_000.0, 300_000.0), "p1.out": (190_000.0, 300_000.0)},
+    )
+    energy_residual = pipe.residuals(state)[1]
+    assert math.isclose(energy_residual, 0.0 - (-1000.0 / 1.0), rel_tol=1e-9)
+
+
+def test_pipe_accepts_heat_path_via_add_heat_path():
+    # A Pipe attached to a live Convection/ThermalMass heat path (rather
+    # than a fixed heat_loss scalar) -- the mechanism the combustion-chamber
+    # liner guide relies on to couple each discretized station to its own
+    # wall ring.
+    src = Source(name="src", P=200_000.0, T=400.0, mdot=1.0)
+    pipe = Pipe(name="p1", L=1.0, D=0.1, f=0.02, n_elem=1)
+    snk = Sink(name="snk")
+    wall = ThermalMass(name="wall", thermal_capacitance=500.0, T0=300.0)
+
+    network = Network(fluid=AIR)
+    for c in (src, pipe, snk):
+        network.add_component(c)
+    network.connect(src, "out", pipe, "in")
+    network.connect(pipe, "out", snk, "in")
+    network.add_heat_path(Convection(name="conv", a=(pipe, "in"), b=wall, h=50.0, A=0.3))
+    # A second path (wall -> fixed ambient) so equilibrium isn't the trivial
+    # zero-net-Q case of a mass with only one heat source -- otherwise the
+    # wall simply settles at the gas temperature and no heat actually flows.
+    network.add_heat_path(Convection(name="conv_ambient", a=wall, b=250.0, h=5.0, A=0.3))
+
+    assert network.check_wiring() == []
+    result = network.solve(tol=1e-9, max_iter=200, verbose=False, progress=False)
+    assert result.converged
+
+    state = result.state()
+    T_wall = state.param("wall.T")
+    T_pipe_in = state.fluid_at("p1.in").temperature_ph(*state.node("p1.in"))
+    # Steady state: the wall's net heat is zero across BOTH its paths, so it
+    # settles strictly between the hot gas it convects with and the fixed
+    # ambient it also loses heat to -- not pinned to either endpoint.
+    assert 250.0 < T_wall < T_pipe_in
+
+    # And the pipe's own energy balance actually lost heat to get there:
+    # h_out should be below h_in by the convected Q/mdot.
+    from thermowave.components.heat_transfer import heat_loss_watts
+    Q_loss = heat_loss_watts(pipe.heat_path, state)
+    assert Q_loss > 0.0
+    P_out, h_out = state.node("p1.out")
+    P_in, h_in = state.node("p1.in")
+    assert math.isclose(h_in - h_out, Q_loss / 1.0, rel_tol=1e-6)

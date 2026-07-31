@@ -437,15 +437,18 @@ returns is positive when its `a` endpoint is hotter than `b` (heat flowing
 - `Radiation(name, a, b, emissivity, A, view_factor=1.0)` — `Q =
   emissivity*view_factor*sigma*A*(T_a^4 - T_b^4)`. General-purpose
   surface-to-surface (or surface-to-ambient) physics, not combustor-
-  specific — the intended primitive a future 1D combustion-chamber liner
-  model will discretize into many of, rather than needing its own formula.
+  specific — the intended primitive a 1D combustion-chamber liner model
+  discretizes into many of, rather than needing its own formula. See
+  [Building a 1D combustion-chamber model](docs/tutorials/building-a-combustion-chamber-model.md)
+  for a worked example (chained single-element `Pipe`s, one `ThermalMass`
+  ring per station).
 
 `a`/`b` on any path is one of: a `ThermalMass`, a fixed `float` (e.g.
 ambient temperature), or a `(component, port_name)` tuple reading that
 component's live fluid temperature at that port's node.
 
 `Turbine`, `Compressor`, `SimpleTurbine`, `SimpleCompressor`,
-`SimpleCombustor`, and `Combustor` each have an optional `heat_path`
+`SimpleCombustor`, `Combustor`, and `Pipe` each have an optional `heat_path`
 attribute (`None` by default — fully adiabatic, unchanged from before this
 existed) that, when set, actually perturbs that component's own energy
 residual — real two-way coupling, not just reporting. Since a path needs
@@ -741,14 +744,13 @@ Where I'm taking this next, in roughly the order I plan to tackle it:
   3-angle VGV compressor map (`compressor_vgv_generic.cop`) alongside
   relocated single-angle compressor/turbine/generator samples (previously
   loose files at the repo root).
-- **A pluggable correlation hook on `MultiPassHeatExchanger`.**
-  It's closed over 4 built-in arrangements today
-  (`src/thermowave/components/multi_pass_heat_exchanger.py`,
-  `_ARRANGEMENTS`: `counterflow`/`parallel`/`crossflow`/`shell_and_tube`).
-  I'm planning to add a `Callable[[NTU, Cr], float]` override alongside
-  those named presets, so a plate-fin/finned-tube/vendor-supplied
-  effectiveness correlation can be dropped in without touching the
-  existing four.
+- **`Pipe` gains a live `heat_path` — landed.** Previously only a fixed
+  scalar `heat_loss` `[W]`; now `Pipe(heat_path=...)` accepts the same
+  `Convection`/`Conduction`/`Radiation` mechanism `Turbine`/`Compressor`/
+  `Combustor` already had, so a chain of single-element `Pipe`s can each
+  convect/radiate to their own `ThermalMass` — the primitive a discretized
+  1D liner needs. See
+  [Building a 1D combustion-chamber model](docs/tutorials/building-a-combustion-chamber-model.md).
 - **Genuinely independent multi-fluid networks.** Right now a `Network` has
   one default working-fluid model (`Network.fluid`), with per-node
   overrides only reaching as far as components that implement

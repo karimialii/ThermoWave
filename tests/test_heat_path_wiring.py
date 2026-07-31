@@ -221,11 +221,12 @@ def test_add_heat_path_rejects_a_bad_port_name_at_wiring_time():
 
 
 def test_add_heat_path_rejects_a_component_with_no_heat_path_attribute():
-    _, _, heater, _, _ = _flow_parts()  # Pipe takes a scalar heat_loss instead
+    _, _, _, _, snk = _flow_parts()  # Sink has no heat_path attribute at all
     casing = ThermalMass(name="casing", thermal_capacitance=100.0, T0=300.0)
     network = Network(fluid=AIR)
+    network.add_component(snk)
 
-    path = Convection(name="path", a=(heater, "out"), b=casing, h=50.0, A=0.3)
+    path = Convection(name="path", a=(snk, "in"), b=casing, h=50.0, A=0.3)
     with pytest.raises(NetworkTopologyError, match="no heat_path attribute"):
         network.add_heat_path(path)
 

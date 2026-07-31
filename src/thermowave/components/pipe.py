@@ -4,6 +4,7 @@ import math
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
+from thermowave.components.heat_transfer import heat_loss_watts
 from thermowave.core.settings import settings
 
 if TYPE_CHECKING:
@@ -44,6 +45,20 @@ class Pipe(BaseComponent):
     (a common way to model a heater/combustor segment via heat_loss alone).
     Leave it None (the default) to use roughness/mu; roughness and mu are
     then both required.
+
+    heat_path: optional Convection/Conduction/Radiation
+    (thermowave.components.heat_transfer) for a live-computed loss on top of
+    (or instead of) the fixed heat_loss above — e.g. a combustion-chamber
+    liner segment radiating/convecting to a ThermalMass wall ring, discretized
+    station by station along a chain of single-element Pipes, rather than one
+    hand-picked constant. Same accounting as Combustor's own heat_path: both
+    heat_loss and heat_path (if given) are summed and split evenly across
+    n_elem, same as heat_loss alone always has been. Like Combustor/Turbine/
+    Compressor, this component's own endpoint is (self, "in") on whichever
+    element the path is meant to represent (n_elem==1 makes that unambiguous;
+    with n_elem>1 every element shares the same total loss, split evenly, not
+    a per-element pick), so build the path after this Pipe already exists, or
+    set it afterwards via pipe.set(heat_path=path).
     """
 
     def __init__(
@@ -56,6 +71,7 @@ class Pipe(BaseComponent):
         f: float | None = None,
         n_elem: int = 1,
         heat_loss: float | None = None,
+        heat_path: BaseComponent | list | tuple | None = None,
     ):
         if f is None and (roughness is None or mu is None):
             raise ValueError(
@@ -70,6 +86,7 @@ class Pipe(BaseComponent):
         self.f = f
         self.n_elem = n_elem
         self.heat_loss = heat_loss
+        self.heat_path = heat_path
         self._inlet_node = f"{name}.in"
         self._outlet_node = f"{name}.out"
         self._area = math.pi * D**2 / 4
@@ -104,7 +121,8 @@ class Pipe(BaseComponent):
     def residuals(self, state: "NetworkState") -> list[float]:
         nodes = self._element_nodes()
         elem_L = self.L / self.n_elem
-        q_elem = 0.0 if self.heat_loss is None else self.heat_loss / self.n_elem
+        total_loss = (self.heat_loss or 0.0) + heat_loss_watts(self.heat_path, state)
+        q_elem = total_loss / self.n_elem
         mdot = state.mdot(self._inlet_node)
         # One fluid for the whole pipe (its own inlet port's, not each
         # internal element's) -- internal element nodes never get their own
