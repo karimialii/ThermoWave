@@ -10,12 +10,12 @@ primary (root) air path and a dilution air path that mixes back in downstream.
 The shape:
 
 1. create the network and the boundary source
-2. split combustion air from dilution air
+2. split combustion air from dilution air, from an independent design rule
 3. the combustor (adiabatic flame)
 4. the discretized liner: hot-gas path, dilution path, wall rings
 5. wire the heat paths
 6. mix dilution air back in, and solve
-7. calibrate the primary/dilution split against measured data
+7. compare the predicted exit temperature against the measurement
 
 A runnable version of this is `tests/test_combustion_chamber_workflow.py`,
 which follows these steps verbatim so the guide can't drift from working
@@ -56,16 +56,32 @@ mixture's properties, not plain air's.
 
 ## 2. Split combustion air from dilution air
 
+`F_PRIMARY` has to come from an *independent* design assumption, not from
+the measured exit temperature — sizing it to force a match against the
+measurement below would make the later comparison circular (fitting a free
+parameter to the answer, then "checking" it against that same answer proves
+nothing). The standard independent rule for a primary combustion zone is a
+target equivalence ratio: primary zones are conventionally sized close to
+stoichiometric (`φ≈1`) for flame stability, regardless of what the exit
+temperature downstream turns out to be:
+
 ```python
 from thermowave.components import Junction
 
-F_PRIMARY = 0.166  # calibrated in step 7 -- start anywhere reasonable, e.g. 0.25
+AFR_STOICH_CH4 = 17.2  # kg air / kg fuel, stoichiometric methane combustion
+F_PRIMARY = (MDOT_FUEL * AFR_STOICH_CH4) / MDOT_AIR  # ~0.146
 
 splitter = Junction(
     name="splitter", n_inlets=1, n_outlets=2,
     split_fractions=[F_PRIMARY, 1.0 - F_PRIMARY],
 )
 ```
+
+This is derived only from the boundary inputs already in hand
+(`MDOT_FUEL`, `MDOT_AIR`) plus a textbook combustion-chemistry ratio — not
+from anything measured downstream of the chamber. If you have the real
+hardware's primary-zone air fraction (swirler/liner-hole area ratio),
+use that instead; it's a better independent input than this rule of thumb.
 
 `Junction` with `n_inlets=1, n_outlets>1` is a pure splitter — `out0` becomes
 the primary (root) air into the combustor, `out1` the dilution air that
@@ -188,35 +204,35 @@ result = network.solve(tol=1e-8, max_iter=800, damping=0.2)
 friction drop — there's no remaining pressure unknown needing a boundary
 value at the far end, unlike a map-based `Turbine`'s outlet.
 
-## 7. Calibrate the primary/dilution split
+## 7. Compare the prediction against the measurement
 
-Rather than guessing `F_PRIMARY`, bisect it against the two measured
-temperatures — the same continuation idea `OperatingSchedule.solve()` in the
-gas-turbine scripts uses, just for one scalar instead of a whole table:
+Every input above — `P_IN`, `T_IN`, `MDOT_AIR`, `MDOT_FUEL`, and now
+`F_PRIMARY` from the stoichiometric design rule — comes from the boundary
+conditions or an independent design assumption, never from the measured
+exit temperature. That's what makes this comparison meaningful instead of
+circular:
 
 ```python
-def exit_temperature(f_primary, warm_start=None):
-    net = build_network(f_primary)  # steps 1-6, wrapped in a function
-    result = net.solve(tol=1e-8, max_iter=800, damping=0.2, warm_start=warm_start)
-    state = result.state()
-    P_out, h_out = state.node("mixer.out0")
-    return state.fluid_at("mixer.out0").temperature_ph(P_out, h_out), result
+P_out, h_out = result.state().node("mixer.out0")
+T_predicted = result.state().fluid_at("mixer.out0").temperature_ph(P_out, h_out)
 
-lo, hi = 0.16, 0.20
-warm = None
-for f in (0.30, 0.26, 0.22, 0.18, 0.16):   # walk down from an easy point first
-    _, warm = exit_temperature(f, warm)
-for _ in range(20):
-    mid = 0.5 * (lo + hi)
-    T_mid, warm = exit_temperature(mid, warm)
-    lo, hi = (mid, hi) if T_mid < T_TARGET_OUT else (lo, mid)
-    if abs(T_mid - T_TARGET_OUT) < 0.02:
-        break
+print(f"predicted exit T: {T_predicted - 273.15:.1f} C")
+print(f"measured exit T:  {T_TARGET_OUT - 273.15:.1f} C")
+print(f"error:            {T_predicted - T_TARGET_OUT:+.1f} C")
 ```
 
-This lands on `F_PRIMARY ≈ 0.166` for the numbers above (≈17% of the total
-air goes to the root, the rest is dilution) — a real, measured-data-derived
-number instead of an assumed split.
+With `F_PRIMARY ≈ 0.146` (the stoichiometric-primary-zone value, ~15% of
+the total air to the root) this network predicts **901.5 °C** against a
+measured **918 °C** — an error of **−16.5 °C** (about 2% of the absolute
+temperature). That gap is a genuine result of this model's own
+simplifications (bulk `h`/`A` liner cooling, no film cooling, an assumed
+rather than measured liner geometry, a stoichiometric-primary-zone
+assumption standing in for the machine's actual air split) — not something
+to tune away by adjusting `F_PRIMARY` back toward whatever value would
+close it. If you *do* have the hardware's real primary-zone air fraction,
+use it in place of the stoichiometric rule above; that replaces one
+independent assumption with a better one, which is different from fitting
+the split to this measurement.
 
 ---
 
@@ -252,8 +268,8 @@ mixer's reported exit pressure quietly reflects only one branch.
 
 ### Liner temperatures come out far hotter than a real metal survives
 
-This model's rings settle in the 2400 K range at the calibrated operating
-point — well past any real liner alloy's limit. That's a real, expected
+This model's rings settle in the 2500 K range at this operating point —
+well past any real liner alloy's limit. That's a real, expected
 consequence of what this model does and doesn't include: bulk `h`/`A`
 convection with no **film cooling** (the thin layer of cool air a real liner
 hugs its hot-side wall with, which drops the *local* gas temperature the

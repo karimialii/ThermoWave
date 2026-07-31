@@ -3,10 +3,13 @@ build workflow (docs/tutorials/building-a-combustion-chamber-model.md),
 mirrored step for step so the guide can't silently rot.
 
 T100-scale operating point: 0.8 kg/s air at 4.17 bar / 587 C into the
-chamber, 6.8 g/s CH4, chamber exit at 918 C -- the fuel/air numbers are the
-measured ones the guide starts from; the liner geometry is an engineering
-estimate (no OEM geometry is public), and the primary/dilution air split is
-calibrated (bisected on) to reproduce the measured exit temperature.
+chamber, 6.8 g/s CH4, chamber exit measured at 918 C -- the fuel/air numbers
+and the two temperatures are measured; the liner geometry is an engineering
+estimate (no OEM geometry is public); the primary/dilution air split comes
+from an independent design rule (a stoichiometric primary zone), NOT from
+fitting to the measured exit temperature -- see the guide's own step 7 for
+why that distinction matters. This model's predicted exit temperature is
+then compared against, not tuned to match, the measured 918 C.
 """
 
 import math
@@ -56,8 +59,14 @@ VOL_RING = math.pi * D_LINER * WALL_THICKNESS * L_SEG
 C_RING = RHO_WALL * CP_WALL * VOL_RING
 A_COND = math.pi * D_LINER * WALL_THICKNESS
 
-# Calibrated (bisected in the guide's own build) to land on T_TARGET_OUT.
-F_PRIMARY = 0.166
+# F_PRIMARY as an INDEPENDENT design input -- a stoichiometric primary zone
+# (the conventional flame-stability design target), derived only from the
+# boundary inputs (MDOT_FUEL, MDOT_AIR) and a textbook AFR, never from the
+# measured exit temperature. Swap in the real hardware's air-split fraction
+# if you have it; that's a better independent input, not a different kind
+# of fit.
+AFR_STOICH_CH4 = 17.2  # kg air / kg fuel, stoichiometric methane combustion
+F_PRIMARY = (MDOT_FUEL * AFR_STOICH_CH4) / MDOT_AIR  # ~0.146
 
 
 def _build(f_primary):
@@ -133,15 +142,23 @@ def test_check_wiring_is_clean():
     assert network.check_wiring() == []
 
 
-def test_calibrated_split_reproduces_measured_exit_temperature():
+def test_prediction_from_independent_inputs_is_within_a_few_percent_of_measured():
+    # F_PRIMARY here is the stoichiometric-primary-zone design value, derived
+    # only from MDOT_FUEL/MDOT_AIR -- never fit to T_TARGET_OUT. This checks
+    # the forward PREDICTION lands in the right ballpark of the measurement,
+    # not that it matches exactly (it shouldn't, and forcing it to would
+    # mean the split was reverse-fit instead of independently chosen -- see
+    # the guide's own step 7 for why that distinction matters).
     network, mixer, _ = _build(F_PRIMARY)
     result = network.solve(tol=1e-8, max_iter=800, damping=0.2, verbose=False, progress=False)
     assert result.converged
 
     T_exit = _exit_temperature(result, network)
-    # Bisected to this tolerance when F_PRIMARY was calibrated -- see the
-    # guide's own calibration loop.
-    assert math.isclose(T_exit, T_TARGET_OUT, abs_tol=1.0)
+    # Measured 901.5 C predicted vs 918 C measured (~-16.5 C, ~2%) when this
+    # was last run -- a real discrepancy from this model's own
+    # simplifications (no film cooling, estimated geometry, an assumed
+    # rather than measured air split), not something to tune away.
+    assert math.isclose(T_exit, T_TARGET_OUT, rel_tol=0.03)
 
 
 def test_exit_temperature_increases_with_more_primary_air():
