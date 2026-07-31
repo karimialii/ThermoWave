@@ -16,6 +16,7 @@ The shape:
 5. wire the heat paths
 6. mix dilution air back in, and solve
 7. compare the predicted exit temperature against the measurement
+8. an engineering trade study: choosing the split under real constraints
 
 A runnable version of this is `tests/test_combustion_chamber_workflow.py`,
 which follows these steps verbatim so the guide can't drift from working
@@ -282,6 +283,80 @@ teaching-model fidelity, not a liner life-prediction tool — a real film-
 cooling effectiveness factor (reducing the effective driving temperature the
 wall sees, not just raising `h`) is the standard fix if you need believable
 liner metal temperatures.
+
+---
+
+## Engineering trade study: choosing `F_PRIMARY` under real constraints
+
+Everything up to step 7 picked one `F_PRIMARY` (from an independent design
+rule) and looked at what it predicts. A real design decision is the reverse
+question: **which `F_PRIMARY` should we actually build**, given more than
+one thing has to be satisfied at once? Here, two real constraints:
+
+1. **Chamber exit temperature** within `918 °C ± 15 °C` — the measured/
+   design turbine-inlet condition. Too low wastes capacity; too high erodes
+   turbine hot-section life.
+2. **CO emissions** under an illustrative regulatory-style limit of
+   `50 ppmvd @ 15% O₂` — the standard *dry, oxygen-corrected* convention
+   real gas-turbine emissions are reported in, not a raw (and dilution-
+   diluted) mole fraction. See `dry_ppmvd_at_15pct_o2()` in the script below
+   for the conversion.
+
+The full sweep, constraints, and plot live in
+[`combustion_chamber_trade_study.py`](combustion_chamber_trade_study.py)
+(same repo folder as this guide) — run it directly:
+
+```bash
+python docs/tutorials/combustion_chamber_trade_study.py
+```
+
+```
+ F_PRIMARY  T_exit[C]  T ok?   CO[ppmvd15]  CO ok?
+--------------------------------------------------
+     0.100      794.3     no       30206.5      no
+     0.120      851.6     no       18593.5      no
+     0.146      901.3     no        6724.5      no
+     0.160      914.1    yes        3749.4      no
+     0.180      924.4    yes        1669.2      no
+     0.200      930.0    yes         771.1      no
+     0.220      933.2     no         371.3      no
+     0.260      936.5     no          97.4      no
+     0.300      938.3     no          29.6     yes
+
+No single F_PRIMARY in this sweep meets both the temperature band and the
+CO limit.
+```
+
+<img src="../_static/results/combustion_chamber_trade_study.png" alt="Combustion chamber trade study: temperature and emissions vs primary/dilution air split" style="max-width:100%">
+
+**No single split satisfies both constraints, and that's the real finding,
+not a bug to fix by widening the sweep.** Hitting the temperature band
+needs a rich-ish primary zone (`F_PRIMARY ≈ 0.16–0.20`), which leaves CO in
+the hundreds-to-thousands of ppm — the mixture simply doesn't have enough
+local O₂ to finish burning. Getting CO under the limit needs a much leaner
+primary zone (`F_PRIMARY ≈ 0.30`), which overshoots the temperature target
+by ~20 °C because there's correspondingly less dilution air left to cool
+the exit down. With this model's fixed 3-station, single-scalar-split
+geometry, temperature and CO aren't independently tunable — which is
+exactly why real annular combustors use *multiple staged dilution rows*
+and deliberate primary-zone geometry instead of one lump air split. The
+honest recommendation here is a compromise near `F_PRIMARY ≈ 0.18–0.20`
+(closest simultaneous balance of the two), with the real fix being liner
+redesign (more stations, staged dilution), not further retuning this one
+number.
+
+**The NOx panel is intentionally not part of the pass/fail logic.**
+Equilibrium chemistry — the same mechanism `Combustor` already uses for
+`T_out` — has no notion of finite-rate kinetics or flame residence
+time/quenching, so it overpredicts real engine NOx by roughly 2–3 orders of
+magnitude (thousands of ppm here vs. tens of ppm on an actual small gas
+turbine). CO happens to survive close to its equilibrium value reasonably
+well in practice, which is why it's usable as an order-of-magnitude design
+proxy above; NOx does not, and treating the NOx numbers as a compliance
+prediction would be a real mistake. An actual NOx prediction needs a
+finite-rate reactor-network model (a perfectly-stirred-reactor + plug-flow
+chain in Cantera, say) or an empirical correlation fitted to test data —
+outside what this package's equilibrium `Combustor` gives you.
 
 ---
 

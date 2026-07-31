@@ -21,11 +21,14 @@ building-a-combustion-chamber-model
 - **[Building a 1D combustion-chamber model](building-a-combustion-chamber-model.md)**
   — a T100-class combustor split into primary (root) and dilution air,
   discretized into a liner of `Pipe`/`ThermalMass`/`Convection`/`Radiation`/
-  `Conduction` stations instead of one lumped `Combustor`. Covers calibrating
-  an unknown split fraction against measured data, and three traps: a
-  too-small annulus diameter that looks like a convergence failure, why
-  `Junction` doesn't reconcile mismatched branch pressures, and why the
-  liner runs far hotter than a real metal survives without film cooling.
+  `Conduction` stations instead of one lumped `Combustor`. Covers deriving
+  the split from an independent design rule (not fitting it to measured
+  data), an engineering trade study that finds a genuine temperature-vs-CO
+  conflict with no single satisfying split, why equilibrium NOx numbers
+  aren't usable as compliance predictions, and three traps: a too-small
+  annulus diameter that looks like a convergence failure, why `Junction`
+  doesn't reconcile mismatched branch pressures, and why the liner runs far
+  hotter than a real metal survives without film cooling.
 
 Looking for shorter, single-purpose snippets instead? See
 [Examples](../examples/index.md). For what each component actually computes,
