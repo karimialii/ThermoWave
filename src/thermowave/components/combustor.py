@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from thermowave.components.base_component import BaseComponent
 from thermowave.components.heat_transfer import heat_loss_watts
 from thermowave.core.constants import MDOT_FUEL_GUESS_FRACTION
+from thermowave.core.exceptions import FluidRangeError
 from thermowave.fluids.base_fluid import BaseFluid
 from thermowave.fluids.cantera_fluid import CanteraFluid, _CanteraCompositionFluid
 
@@ -170,7 +171,20 @@ class Combustor(BaseComponent):
         fuel_stream.mass = mdot_fuel
 
         mixture = air + fuel_stream
-        mixture.equilibrate("HP")
+        try:
+            mixture.equilibrate("HP")
+        except ct.CanteraError as exc:
+            # Same reasoning as CanteraFluid.temperature_ph's identical
+            # try/except: equilibrate("HP") is iterative and can fail to
+            # converge for a Newton trial's transiently unphysical (T, P,
+            # mdot) rather than a real modeling error, so it's translated
+            # into FluidRangeError so solver.py's line search can reject
+            # the trial and back off instead of the whole solve crashing.
+            raise FluidRangeError(
+                f"Combustor {self.name!r} equilibrate(\"HP\") failed for "
+                f"T_in={T_in}, P_in={P_in}, mdot_air={mdot_air}, "
+                f"mdot_fuel={mdot_fuel}: {exc}"
+            ) from exc
         return mixture
 
     def _equilibrium_T_out(self, T_in: float, P_in: float, mdot_air: float, mdot_fuel: float) -> float:

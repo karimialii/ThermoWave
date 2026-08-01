@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable
 import numpy as np
 
 from thermowave.core import reporting
-from thermowave.core.exceptions import ConvergenceError, NetworkTopologyError
+from thermowave.core.exceptions import ConvergenceError, FluidRangeError, NetworkTopologyError
 
 if TYPE_CHECKING:
     from thermowave.components.base_component import BaseComponent
@@ -87,8 +87,11 @@ def newton_solve(
     progress: bool = True,
     max_jacobian_reuse: int = 4,
     jacobian_reuse_contraction: float = 0.5,
+    max_backtracks: int = 8,
+    step_growth: float = 1.0,
 ) -> tuple[np.ndarray, int, float]:
-    """Damped Newton-Raphson with a finite-difference Jacobian.
+    """Damped Newton-Raphson with a finite-difference Jacobian and a
+    backtracking line search.
 
     progress: show a fixed, in-place terminal progress bar (see
     thermowave.core.progress.ProgressBar) — on by default; live redraws only
@@ -132,6 +135,48 @@ def newton_solve(
     solvers (Aspen Plus, HYSYS, ...), which by default cap how much any
     physical variable may change in a single iteration for exactly this
     reason. Default: no limiting.
+
+    damping / max_backtracks / step_growth: damping is no longer applied as
+    a flat scalar on every step by itself. Iteration 1 always tries exactly
+    `damping * dx`, same as plain fixed-damping Newton; every later
+    iteration first tries a *ceiling* that grows by a factor of
+    `step_growth` once a step has actually landed safely at the current
+    ceiling with no backoff, up to a full Newton step -- and any backoff
+    (the ceiling's trial not reducing ‖F‖) resets the ceiling straight back
+    down to `damping`. If a trial doesn't reduce ‖F‖, it's retried at half
+    that size, then a quarter, and so on, down to `damping` itself, which is
+    always the last resort and is accepted unconditionally -- so regardless
+    of step_growth, the worst case is exactly plain fixed-damping behavior,
+    never worse.
+
+    step_growth defaults to 1.0, which means the ceiling never actually
+    grows past `damping` -- i.e. by default this reduces to plain
+    fixed-damping Newton, identical to the solver before this line search
+    existed. That default is deliberate, not a placeholder: a fixed damping
+    (e.g. 0.3) forces linear (geometric, ratio (1-damping)) convergence for
+    as long as it's applied, even once the iterate is in Newton's actual
+    quadratically-convergent regime, which both wastes iterations directly
+    and (since each iteration then only contracts ‖F‖ by ~(1-damping),
+    worse than the 0.5 jacobian_reuse_contraction needs for damping=0.3)
+    starves the Jacobian-reuse check above of the contraction it needs to
+    ever trigger. Growing the ceiling (step_growth > 1.0, e.g. 1.2) can
+    remove both costs once a trajectory proves well-behaved -- but ‖F‖
+    dropping does not guarantee the new point is well-conditioned or even
+    physically valid: on a stiff real-gas network (a combustor's chemical
+    equilibrium plus two coupled PID loops was the case this was found on),
+    growth eventually drove a trial into a Cantera HP-solve failure
+    somewhere along a 65-90-iteration trajectory, reproduced with immediate
+    full-step, gradual 1.2x/iteration growth, and even a ceiling hard-capped
+    at 2x damping -- pacing the growth more gently only delayed the failure,
+    it didn't prevent it. So step_growth > 1.0 is an explicit, per-call
+    opt-in for networks/callers who have verified it's safe for their case,
+    not a default; enable it and re-verify against your own network before
+    relying on it, the same way you'd validate any other solver-tuning
+    knob (tol, damping, max_jacobian_reuse) against a new model.
+    max_backtracks bounds how many halvings are tried before falling back to
+    `damping`; each trial costs one extra residual evaluation (far cheaper
+    than a Jacobian rebuild), so this is a small, bounded price for the
+    larger steps a proven-safe, step_growth>1.0 trajectory gets to take.
     """
     x = np.array(x0, dtype=float)
     if clamp_fn is not None:
@@ -153,9 +198,83 @@ def newton_solve(
     reuse_count = 0
     prev_norm = float("inf")
 
+    # F/residual_norm are carried across iterations rather than recomputed at
+    # the top of each one: the line search below already evaluates
+    # residual_fn at whatever point it ends up accepting, so that's reused
+    # directly as next iteration's starting F instead of paying for it twice.
+    F = residual_fn(x)
+    residual_norm = float(np.linalg.norm(F))
+
+    # Line-search ceiling: starts at `damping` -- exactly the old fixed-step
+    # behavior -- and only grows (toward a full Newton step) once an
+    # iteration succeeds *at* that ceiling without needing to back off.
+    # Jumping straight to a full step from iteration 1 was tried and
+    # rejected: on a network whose components have real edges (a
+    # characteristic map's bounds, a clamp floor two unknowns can collide
+    # on), one big early step can land the *next* iteration's Jacobian on a
+    # singular point even though the step itself looked like an improvement
+    # -- ‖F‖ dropping doesn't guarantee the new point is well-conditioned.
+    # Growing gradually only after consecutive steps have already landed
+    # safely keeps iteration 1 identical to the original behavior and only
+    # takes bigger steps once the trajectory has *demonstrated* it's in a
+    # well-behaved region -- any backoff immediately resets the ceiling back
+    # down to `damping`, the same instinct as the Jacobian-refresh-on-stall
+    # rule above.
+    ceiling = damping
+    ceiling_growth = step_growth  # see step_growth's own docstring above -- default 1.0 (off)
+
+    def line_search(x_from, F_from, norm_from, dx, start_ceiling):
+        """One backtracking line search from (x_from, F_from, norm_from)
+        along dx, starting at start_ceiling and halving down to `damping`
+        (always accepted unconditionally as the last resort, bounded by
+        max_backtracks so a pathological damping<=0 still terminates).
+        Returns (x_trial, F_trial, norm_trial, next_ceiling).
+
+        A FluidRangeError from residual_fn (a trial's (P, h, ...) landed
+        somewhere a real fluid backend -- Cantera's HP solve, an
+        equilibrium calc -- can't evaluate) is treated exactly like a
+        residual that didn't improve: back off and try a smaller trial.
+        Only the final, most-conservative attempt (use_trial <= damping)
+        re-raises it, since there's nothing smaller left to fall back to
+        *within this call* -- the caller's rollback-to-last-known-good-point
+        handling (below) takes over from there.
+        """
+        trial = start_ceiling
+        backed_off = False
+        for attempt in range(max_backtracks):
+            use_trial = damping if trial <= damping or attempt == max_backtracks - 1 else trial
+            x_trial = x_from + use_trial * dx
+            if clamp_fn is not None:
+                x_trial = clamp_fn(x_trial)
+            try:
+                F_trial = residual_fn(x_trial)
+            except FluidRangeError:
+                if use_trial <= damping:
+                    raise
+                trial *= 0.5
+                backed_off = True
+                continue
+            norm_trial = float(np.linalg.norm(F_trial))
+            if norm_trial <= norm_from or use_trial <= damping:
+                break
+            trial *= 0.5
+            backed_off = True
+        next_ceiling = damping if backed_off else min(1.0, start_ceiling * ceiling_growth)
+        return x_trial, F_trial, norm_trial, next_ceiling
+
+    # Rollback state: the point/direction that produced the *current* x, so
+    # that if the current x turns out to have a singular Jacobian (possible
+    # even though it looked like an improvement in ‖F‖ when accepted -- see
+    # the docstring above), that step can be undone and retried at a much
+    # smaller ceiling instead of failing outright. Only sound to retry
+    # something we can actually undo, hence x_prev starting at None.
+    x_prev: np.ndarray | None = None
+    F_prev: np.ndarray | None = None
+    norm_prev_point: float | None = None
+    dx_prev: np.ndarray | None = None
+    rollback_budget = 6
+
     for iteration in range(1, max_iter + 1):
-        F = residual_fn(x)
-        residual_norm = float(np.linalg.norm(F))
         if residual_norm < tol:
             if bar is not None:
                 reporting.finish_solve_progress(
@@ -169,42 +288,77 @@ def newton_solve(
             or reuse_count >= max_jacobian_reuse
             or not (residual_norm <= jacobian_reuse_contraction * prev_norm)
         )
-        if refresh:
-            J = _finite_difference_jacobian(residual_fn, x, F)
-            r, c = _ruiz_equilibrate(J)
-            J_scaled = (J * r[:, None]) * c[None, :]
-            reuse_count = 0
-        else:
-            reuse_count += 1
 
+        # Everything that can discover "the point we're standing on (x) is
+        # actually untenable" lives in this one try: a finite-difference
+        # perturbation landing somewhere a fluid backend can't evaluate
+        # (FluidRangeError), a Jacobian that doesn't invert (LinAlgError),
+        # or the line search itself exhausting every trial down to
+        # `damping` without a valid evaluation (FluidRangeError, re-raised
+        # by line_search's own last-resort attempt). All three get the same
+        # recovery: x wasn't the problem when it was *accepted* -- ‖F‖
+        # improving doesn't guarantee the next differentiation or the next
+        # step from it stays valid -- so roll back to the last point that
+        # demonstrably worked (x_prev) and retry its step at a smaller,
+        # forced-conservative ceiling instead of giving up outright.
         try:
+            if refresh:
+                J = _finite_difference_jacobian(residual_fn, x, F)
+                r, c = _ruiz_equilibrate(J)
+                J_scaled = (J * r[:, None]) * c[None, :]
+                reuse_count = 0
+            else:
+                reuse_count += 1
+
             y = np.linalg.solve(J_scaled, -(r * F))
-        except np.linalg.LinAlgError as exc:
+            dx = c * y
+
+            if step_limit_fn is not None:
+                dx = step_limit_fn(x, dx)
+
+            x_trial, F_trial, norm_trial, next_ceiling = line_search(x, F, residual_norm, dx, ceiling)
+        except (np.linalg.LinAlgError, FluidRangeError) as exc:
+            recovered = False
+            while x_prev is not None and rollback_budget > 0:
+                # Halving the *rollback* ceiling (not `ceiling` itself) on
+                # each successive failure means repeated bad luck backs off
+                # further each retry, and dx_prev -- computed from a
+                # Jacobian at x_prev that *did* invert cleanly -- is reused
+                # rather than rederived, since x_prev was never the problem.
+                rollback_budget -= 1
+                retry_ceiling = damping / (2 ** (6 - rollback_budget))
+                try:
+                    x, F, residual_norm, _ = line_search(
+                        x_prev, F_prev, norm_prev_point, dx_prev, retry_ceiling
+                    )
+                except FluidRangeError:
+                    continue
+                recovered = True
+                break
+            if recovered:
+                ceiling = damping
+                J_scaled = None  # force a fresh Jacobian at the retried point
+                continue
             if bar is not None:
                 reporting.finish_solve_progress(
                     bar, False, iteration - 1, residual_norm, tol, verbose=verbose
                 )
             raise ConvergenceError(
-                f"Singular Jacobian at iteration {iteration}: {exc}"
+                f"Solve failed at iteration {iteration}: {exc}"
             ) from exc
-        dx = c * y
 
-        if step_limit_fn is not None:
-            dx = step_limit_fn(x, dx)
-        step = damping * dx
+        ceiling = next_ceiling
         if bar is not None:
             reporting.render_solve_progress(
-                bar, iteration, max_iter, residual_norm, float(np.linalg.norm(step)),
-                verbose=verbose,
+                bar, iteration, max_iter, residual_norm,
+                float(np.linalg.norm(x_trial - x)), verbose=verbose,
             )
 
-        x = x + step
-        if clamp_fn is not None:
-            x = clamp_fn(x)
         prev_norm = residual_norm
+        x_prev, F_prev, norm_prev_point, dx_prev = x, F, residual_norm, dx
+        rollback_budget = 6
+        x, F, residual_norm = x_trial, F_trial, norm_trial
 
-    F = residual_fn(x)
-    residual_norm = float(np.linalg.norm(F))
     if residual_norm < tol:
         if bar is not None:
             reporting.finish_solve_progress(
@@ -362,12 +516,21 @@ class Solver:
         prev_diff_values: dict[str, float] | None = None,
         warm_start: "SolveResult | None" = None,
         jacobian_reuse: int | None = None,
+        step_growth: float | None = None,
     ) -> SolveResult:
         """dt/prev_diff_values are advanced/internal knobs used by
         Network.solve_transient() — see its docstring and
         BaseComponent.differential_parameters()/state_derivative() for the
         full contract. Leave both at their defaults (None) for an ordinary
         steady-state solve, which is what Network.solve() does.
+
+        step_growth: forwarded to newton_solve() (see its own docstring for
+        the full contract and why the default there is 1.0, i.e. off).
+        Leave at the default None here (also off) unless you've verified
+        step_growth > 1.0 is safe for *this* network -- it was found to
+        drive a stiff real-gas network into solver failures that plain
+        fixed damping doesn't, so it's an explicit per-call opt-in, not a
+        setting to enable broadly.
 
         warm_start: an earlier SolveResult (from this network or a related
         one — e.g. the same physical network with fewer free unknowns, one
@@ -739,6 +902,8 @@ class Solver:
             newton_kwargs = {}
             if jacobian_reuse is not None:
                 newton_kwargs["max_jacobian_reuse"] = jacobian_reuse
+            if step_growth is not None:
+                newton_kwargs["step_growth"] = step_growth
             x_sol, iterations, residual_norm = newton_solve(
                 residual_vector,
                 x0,

@@ -765,6 +765,7 @@ class Network:
         prev_diff_values: dict[str, float] | None = None,
         warm_start: "SolveResult | None" = None,
         jacobian_reuse: int | None = None,
+        step_growth: float | None = None,
     ) -> "SolveResult":
         """dt/prev_diff_values are advanced/internal — see Solver.solve()
         and BaseComponent.differential_parameters(). Ordinary steady-state
@@ -779,14 +780,26 @@ class Network:
         this is safe to leave on in scripts/logs/tests: it just prints one
         final summary line there instead). Set False for total silence.
         verbose adds iteration/residual/step detail to that bar's text; it
-        has no effect when progress=False."""
+        has no effect when progress=False.
+
+        step_growth: off by default (None -> newton_solve()'s own default
+        of 1.0) -- see newton_solve()'s docstring for the full contract.
+        Lets damped Newton iterations grow toward a full Newton step once a
+        trajectory has demonstrated several steps landing safely, which can
+        cut iteration count substantially and let Jacobian reuse actually
+        trigger -- but ‖F‖ improving doesn't guarantee the new point stays
+        physically valid, and this was found to reliably break a stiff
+        real-gas network (chemical equilibrium + coupled PID control) that
+        plain fixed damping handles fine. Only pass step_growth > 1.0 for a
+        network you've specifically verified still converges correctly with
+        it enabled — it is not a safe-by-default speed knob."""
         self.validate_topology()
         from thermowave.core.solver import Solver
 
         return Solver(self).solve(
             tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
             dt=dt, prev_diff_values=prev_diff_values, warm_start=warm_start,
-            jacobian_reuse=jacobian_reuse,
+            jacobian_reuse=jacobian_reuse, step_growth=step_growth,
         )
 
     def solve_transient(
@@ -809,12 +822,17 @@ class Network:
         shrink_limit: float = 0.2,
         max_step_shrinks: int = 10,
         jacobian_reuse: int | None = None,
+        step_growth: float | None = None,
     ) -> "TransientResult":
         """Quasi-steady transient over every differential state any
         component in this network declares (e.g. a dynamic Shaft's rotor
         speed) — see thermowave.core.transient.solve_transient() for the
         full contract, including what adaptive/rtol/atol/dt_min/dt_max and
-        the rest of the step-size-control knobs do."""
+        the rest of the step-size-control knobs do.
+
+        step_growth: forwarded to every per-timestep Network.solve() call —
+        see that method's own docstring. Off by default; only enable for a
+        network you've verified converges correctly with it on."""
         self.validate_topology()
         from thermowave.core.transient import solve_transient
 
@@ -824,4 +842,5 @@ class Network:
             adaptive=adaptive, rtol=rtol, atol=atol, dt_min=dt_min, dt_max=dt_max,
             safety=safety, growth_limit=growth_limit, shrink_limit=shrink_limit,
             max_step_shrinks=max_step_shrinks, jacobian_reuse=jacobian_reuse,
+            step_growth=step_growth,
         )
