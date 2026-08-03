@@ -2,10 +2,7 @@ import math
 
 import pytest
 
-from thermowave.components.compressor import Compressor
 from thermowave.components.electric_motor import ElectricMotor
-from thermowave.components.multi_pass_heat_exchanger import MultiPassHeatExchanger
-from thermowave.components.pump import Pump
 from thermowave.components.simple_compressor import SimpleCompressor
 from thermowave.components.simple_condenser import SimpleCondenser
 from thermowave.components.simple_heat_exchanger import SimpleHeatExchanger
@@ -17,7 +14,7 @@ from thermowave.core.exergy import (
     exergy_report,
     node_exergy,
 )
-from thermowave.core.network import Network, NetworkState
+from thermowave.core.network import Network
 from thermowave.fluids.ideal_gas import IdealGasFluid
 
 AIR = IdealGasFluid(name="air", R=287.05, cp=1005.0)
@@ -111,7 +108,7 @@ def test_node_exergy_flow_rate_is_none_without_mdot():
 
 
 def test_node_exergy_raises_for_cantera_fluid():
-    ct = pytest.importorskip("cantera")
+    pytest.importorskip("cantera")
     from thermowave.fluids.cantera_fluid import CanteraFluid
 
     gas = CanteraFluid(name="air", composition={"N2": 0.79, "O2": 0.21})
