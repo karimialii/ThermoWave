@@ -1,0 +1,153 @@
+# Benchmark: 11 kWe ORC waste-heat-recovery rig
+
+`orc11kwe_benchmark.py` checks ThermoWave's `Source -> Pump -> SimpleEvaporator`
+chain against a published, instrumented 11 kWe organic Rankine cycle (ORC)
+test rig — R245fa working fluid, plate heat exchangers, screw expander at a
+fixed 5000 rpm — built and characterized under the ORCNext project.
+
+Run it directly (needs the `coolprop` extra):
+
+```bash
+pip install thermowave[coolprop]
+python docs/benchmark/orc11kwe/orc11kwe_benchmark.py
+```
+
+## The reference data
+
+The paper reports the *achieved operating envelope* across a two-level
+design of experiments — heat-source mass flow rate at 1.5 kg/s or 3.0 kg/s,
+crossed with heat-source inlet temperature at 110 °C or 120 °C — as a
+min/max range table (their Table 5):
+
+| Variable | Min. value | Max. value |
+|---|---|---|
+| ṁ_hf (kg/s) | 1.495 | 3.006 |
+| T_hf,in (°C) | 110.0 | 120.0 |
+| T_hf,out (°C) | 83.0 | 103.4 |
+| p_evap (bar) | 9.510 | 12.457 |
+| p_cond (bar) | 2.148 | 2.771 |
+| T_superheat (°C) | 19.8 | 21.1 |
+| ṁ_wf (kg/s) | 0.2902 | 0.3874 |
+
+Source: *Organic Rankine Cycle Part-Load Characterization: Validated Models
+of an 11 kWe ORC*, University of Pretoria repository (ORCNext project
+dataset), Table 5.
+
+**On the pressure labels:** the source PDF's text extraction mangled both
+pressure variables' subscripts to the same characters (a Unicode-subscript
+font rendering artifact, not a mistake in the paper itself). The magnitudes
+resolve the ambiguity on their own: R245fa's saturation pressure at
+100–120 °C (the evaporator's temperature range) falls in the 9–12 bar
+band, and at a plausible 25–35 °C condenser-cooling-water temperature
+falls in the 2–3 bar band. So the second column here is read as the
+**condensing** pressure, not a second evaporator-side reading. This script
+carries that inference explicitly rather than silently guessing.
+
+The two table columns are treated as the two extreme corners of the paper's
+own 2×2 DOE (low-flow/low-temperature vs. high-flow/high-temperature) — a
+reasonable pairing given how the DOE is described in the surrounding text,
+though Table 5 itself only states them as the overall achieved min/max
+range across all logged points, not as two individually tied rows. That
+reading is the benchmark's own assumption, not something asserted by the
+paper.
+
+## What this benchmark checks, and what it deliberately doesn't
+
+The paper validates net electrical power to within ±2%, and separately
+validates evaporator/condenser heat-balance closure (primary-side duty vs.
+secondary-side duty) to within ±5% — but both of those numbers live in
+scatter plots (their Figures 5–9), not in a table, and the paper's own
+pump/expander isentropic efficiencies aren't in the excerpt available here
+either. Chasing the ±2% net-power figure without those efficiencies would
+mean picking numbers to hit a target — fitting, not validation — so this
+script doesn't attempt it. There's no `orc11kwe`-flavored expander
+component check here for the same reason.
+
+What *is* fully grounded in Table 5, with no invented numbers, is the
+**evaporator heat balance**: the heat-source (Therminol 66 thermal oil)
+duty implied by its published `ṁ_hf`, `T_hf,in`, `T_hf,out`, versus the
+working-fluid-side duty ThermoWave computes for the same evaporator from
+`ṁ_wf`, `p_evap`, and `T_superheat`. Comparing those two against the
+paper's own claimed ±5% closure band is a real, citable check — it's
+exactly the case the paper's own Figures 8–9 make for their model, just
+computed independently here from the table instead of read off their plot.
+
+The oil-side duty needs the oil's specific heat, which isn't in the excerpt
+of the ORC paper used here; it comes from Eastman's own published
+Therminol 66 correlation instead (see `therminol66_cp()` in the script,
+sourced from Eastman technical bulletin TF-8695) — a legitimate, citable
+number, just from a different public source than the ORC paper.
+
+The one genuinely *assumed* (neither published nor derived) number is the
+pump's isentropic efficiency, `PUMP_ETA_ASSUMED = 0.75`. It barely matters:
+pump work for a liquid is `dh ≈ v·dP / eta`, and across this cycle's
+pressure rise that's a few hundred J/kg against an evaporator duty of
+roughly 2×10⁵ J/kg — under 1% of the quantity actually being checked. It's
+included so the network models a physically complete pump-to-evaporator
+chain rather than silently skipping the pump, and it's called out here so
+nobody mistakes the pump's own efficiency as a validated figure.
+
+## The network
+
+```
+Source(R245fa, P=p_cond, T=T_sat(p_cond) - 0.5 K, mdot=mdot_wf)
+    -> Pump(P_out=p_evap, eta=0.75)      # assumed, see above
+    -> SimpleEvaporator(superheat=T_superheat)
+    -> Sink()
+```
+
+`Source` starts the working fluid as a (slightly, numerically) subcooled
+liquid at the condensing pressure — the state the fluid would be in
+leaving the condenser. The 0.5 K subcooling is purely a numerical-safety
+margin, keeping CoolProp on the unambiguous single-phase-liquid branch
+rather than exactly on the saturation dome; it is not a claim about the
+rig's actual subcooling, which isn't in the data used here.
+
+`Pump` raises the pressure to `p_evap` (`Pump` is entropy-based —
+`s_in = entropy_ph(...)`, `h_out_isentropic = enthalpy_ps(...)`, scaled by
+`eta` — the correct real-liquid model, unlike a gamma-relation compressor).
+
+`SimpleEvaporator` boils and superheats the working fluid at (effectively)
+constant pressure up to `T_sat(p_evap) + T_superheat`, using the published
+superheat value directly. `Q = mdot * (h_out - h_in)` for this component is
+exactly the working-fluid-side duty this benchmark reports as `Q_wf`.
+
+## Results
+
+```
+case                                       Q_wf [kW]  Q_oil [kW]  rel. dev   result
+------------------------------------------------------------------------------------------
+low (mdot_hf~1.5 kg/s, T_hf,in=110 C)          71.18       73.63     -3.3%   PASS
+high (mdot_hf~3.0 kg/s, T_hf,in=120 C)         94.86       93.67     +1.3%   PASS
+------------------------------------------------------------------------------------------
+
+PASS: ThermoWave's evaporator-side duty (Source -> Pump -> SimpleEvaporator)
+matches the oil-side duty implied by the published mdot_hf/T_hf,in/T_hf,out
+to within the paper's own reported +/-5% heat-balance closure band, at both
+ends of the published operating envelope.
+```
+
+Both operating points land inside the ±5% band, comfortably so (−3.3% and
++1.3%) — well within what the paper itself reports for its own model's
+heat-balance closure. This isn't a tuned fit: nothing here was adjusted to
+hit that number; `p_evap`, `T_superheat`, and `ṁ_wf` come straight from
+Table 5, and the oil-side duty comes straight from Table 5's `ṁ_hf`/`T_hf`
+values plus Eastman's own Therminol 66 property correlation.
+
+## What would make this benchmark stronger
+
+Digitizing the paper's Figures 5–9 (or getting the underlying numeric log
+rather than a plot) would unlock two things this script can't do yet:
+
+1. **A matched single operating point.** Table 5's columns are the overall
+   achieved *range*, not two specific tied-together readings — treating
+   them as the two DOE corners is a reasonable but unverified assumption.
+   A single logged data row would remove that assumption entirely.
+2. **A net-power check.** With a published (or back-calculated) expander
+   isentropic efficiency, the same network extended with
+   `thermowave.components.SteamTurbine` (the entropy-based, two-phase-
+   correct expander model — already used elsewhere in this repo, e.g. for
+   the Rotor 37 companion benchmark's Compressor discussion) and
+   `SimpleCondenser` would close the full cycle and let this benchmark
+   check net electrical power against the paper's claimed ±2%, not just
+   the evaporator heat balance.
