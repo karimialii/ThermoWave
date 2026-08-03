@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
+from thermowave.core.network import TargetValue
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -13,17 +14,35 @@ class Setpoint(BaseComponent):
     by leaning on a free parameter that component already declared.
 
     Has no ports of its own — it contributes exactly one residual:
-    component.report_metrics(state)[target_metric] - value == 0. It doesn't
-    "free" anything itself; the target component must already expose the
-    named parameter as free (e.g. Compressor(..., N=None)), which is where
-    the matching extra Newton unknown comes from. Setpoint just supplies the
-    other half: the equation that pins that unknown down.
+    component.report_metrics(state)[target_metric] - value(state) == 0. It
+    doesn't "free" anything itself; the target component must already
+    expose the named parameter as free (e.g. Compressor(..., N=None)),
+    which is where the matching extra Newton unknown comes from. Setpoint
+    just supplies the other half: the equation that pins that unknown down.
 
     This generalizes "give a target instead of a direct input" to any
     component/metric pair without teaching every component a bespoke
     N-or-PR-or-power constructor: e.g. tie a Compressor's free N to a target
     power, tie it to a target PR, or (once other components expose their own
     free_parameters()) tie a Valve's opening to a target downstream pressure.
+
+    value: a plain float (the common case — a fixed design target), or a
+    callable state -> float re-evaluated fresh every residual call, for
+    tying the target metric to something that's itself part of the solve
+    rather than a constant — e.g. matching two streams' temperatures at a
+    merge point (a real design rule in recuperated/recompression cycles,
+    where mixing streams at different temperatures destroys exergy):
+        Setpoint(
+            name="match_T", component=recompressor, free_param="N",
+            target_metric="T_out [K]",
+            value=lambda s: sensor_on_other_stream.report_metrics(s)["T [K]"],
+        )
+    (Sensor — thermowave.components.sensor — is the usual way to read a
+    plain node's state for this; report_metrics() on any component works
+    too.) A callable value has no closing residual of its own to supply —
+    it's read like any other live network quantity, the same way
+    target_metric already is; whatever free parameter it happens to depend
+    on (if any) must be closed elsewhere, exactly as for a constant target.
 
     Raises ValueError at construction if the target component doesn't
     currently declare free_param as free — this is almost always a
@@ -38,7 +57,7 @@ class Setpoint(BaseComponent):
         component: BaseComponent,
         free_param: str,
         target_metric: str,
-        value: float,
+        value: TargetValue,
     ):
         if free_param not in component.free_parameters():
             raise ValueError(
@@ -52,6 +71,9 @@ class Setpoint(BaseComponent):
         self.free_param = free_param
         self.target_metric = target_metric
         self.value = value
+
+    def _target(self, state: "NetworkState") -> float:
+        return self.value(state) if callable(self.value) else self.value
 
     def ports(self) -> dict[str, str]:
         return {}
@@ -70,12 +92,13 @@ class Setpoint(BaseComponent):
                 f"{self.component.name!r}, but report_metrics() doesn't expose it "
                 f"(got: {sorted(metrics) if metrics else []})"
             )
-        return [metrics[self.target_metric] - self.value]
+        return [metrics[self.target_metric] - self._target(state)]
 
     def report_metrics(self, state: "NetworkState") -> dict[str, float]:
         measured = self.component.report_metrics(state)[self.target_metric]
+        target = self._target(state)
         return {
-            "target [-]": self.value,
+            "target [-]": target,
             "measured [-]": measured,
-            "error [-]": measured - self.value,
+            "error [-]": measured - target,
         }

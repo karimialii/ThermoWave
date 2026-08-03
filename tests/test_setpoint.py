@@ -112,3 +112,46 @@ def test_network_solve_verbose_prints_system_summary(capsys):
     out = capsys.readouterr().out
     assert "Network system:" in out
     assert "square, solvable" in out
+
+
+def test_setpoint_accepts_callable_value_evaluated_live():
+    comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=1.4)
+    sp = Setpoint(
+        name="sp1", component=comp, free_param="N", target_metric="power [W]",
+        value=lambda s: s.reference_power,
+    )
+
+    class _FakeComponentState:
+        reference_power = 321.0
+
+    class _StubComponent:
+        name = "c1"
+
+        def report_metrics(self, state):
+            return {"power [W]": 700.0}
+
+    sp.component = _StubComponent()
+    assert sp.residuals(_FakeComponentState()) == [700.0 - 321.0]
+
+
+def test_setpoint_report_metrics_evaluates_callable_target():
+    comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=1.4)
+    sp = Setpoint(
+        name="sp1", component=comp, free_param="N", target_metric="power [W]",
+        value=lambda s: 100.0,
+    )
+
+    class _FakeComponentState:
+        pass
+
+    class _StubComponent:
+        name = "c1"
+
+        def report_metrics(self, state):
+            return {"power [W]": 700.0}
+
+    sp.component = _StubComponent()
+    metrics = sp.report_metrics(_FakeComponentState())
+    assert metrics["target [-]"] == 100.0
+    assert metrics["measured [-]"] == 700.0
+    assert metrics["error [-]"] == 600.0

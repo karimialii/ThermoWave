@@ -1,15 +1,19 @@
 """Duck-typed capability checks for two-phase / entropy-aware fluids.
 
-Saturation, quality, and entropy methods live only on CoolPropFluid (the
-only fluid model here that can physically represent phase change) -- they
-are deliberately NOT on the BaseFluid abstract interface, since
-IdealGasFluid/CanteraFluid can't implement them. Components that need those
-capabilities check for them structurally (hasattr on the specific method
-names below) rather than with isinstance(fluid, CoolPropFluid): checking for
-the actual methods a component calls, rather than a specific class, means
-any fluid exposing that contract qualifies -- including a future
-REFPROP-backed fluid, or any other model that computes saturation/entropy
-properties without being a CoolPropFluid subclass.
+Saturation and quality methods live only on CoolPropFluid (the only fluid
+model here that can physically represent phase change) -- they are
+deliberately NOT on the BaseFluid abstract interface, since
+IdealGasFluid/CanteraFluid have no saturation dome to compute them from.
+Entropy methods (entropy_ph/enthalpy_ps) are different: CoolPropFluid has
+them, and so does every ConstantCpFluid subclass (IdealGasFluid,
+IdealGasMixtureFluid) via a closed-form ideal-gas relation (see
+ConstantCpFluid.entropy_ph's docstring) -- only CanteraFluid still lacks
+them. Components that need either capability check for it structurally
+(hasattr on the specific method names below) rather than with
+isinstance(fluid, CoolPropFluid): checking for the actual methods a
+component calls, rather than a specific class, means any fluid exposing
+that contract qualifies -- including a future REFPROP-backed fluid, or any
+other model that computes saturation/entropy properties some other way.
 """
 
 from __future__ import annotations
@@ -55,7 +59,7 @@ def require_entropy(fluid: "BaseFluid", component_name: str) -> None:
     if not supports_entropy(fluid):
         raise ValueError(
             f"{component_name!r} needs a fluid exposing {_ENTROPY_METHODS} for its "
-            f"isentropic path (e.g. CoolPropFluid) -- got {type(fluid).__name__} "
-            f"{getattr(fluid, 'name', '?')!r}. The ideal-gas/Cantera models don't "
-            f"provide entropy here; use CoolPropFluid."
+            f"isentropic path (CoolPropFluid, IdealGasFluid, or IdealGasMixtureFluid "
+            f"all have it) -- got {type(fluid).__name__} {getattr(fluid, 'name', '?')!r}. "
+            f"The Cantera model doesn't provide entropy here."
         )

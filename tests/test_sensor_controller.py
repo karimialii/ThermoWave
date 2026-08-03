@@ -133,3 +133,50 @@ def test_controller_drives_compressor_outlet_temperature_end_to_end():
     P_out, h_out = result.node_P["comp.out"], result.node_h["comp.out"]
     T_out = air.temperature_ph(P_out, h_out)
     assert math.isclose(T_out, target_T, abs_tol=1e-4)
+
+
+def test_controller_accepts_callable_value_evaluated_live():
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=1.4)
+    sensor_a = Sensor(name="sa")
+    sensor_b = Sensor(name="sb")
+    ctrl = Controller(
+        name="ctrl1", sensor=sensor_a, quantity="T [K]",
+        component=comp, free_param="N",
+        value=lambda s: sensor_b.report_metrics(s)["T [K]"],
+    )
+
+    P, T_a, T_b = 300000.0, 400.0, 355.0
+    state = _FakeState(
+        fluid=AIR,
+        mdot={"sa.tap": 1.0, "sb.tap": 1.0},
+        node_values={
+            "sa.tap": (P, AIR.enthalpy_pt(P, T_a)),
+            "sb.tap": (P, AIR.enthalpy_pt(P, T_b)),
+        },
+    )
+    residual = ctrl.residuals(state)
+    assert math.isclose(residual[0], T_a - T_b, rel_tol=1e-9)
+
+
+def test_controller_report_metrics_evaluates_callable_target():
+    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=1.4)
+    sensor_a = Sensor(name="sa")
+    sensor_b = Sensor(name="sb")
+    ctrl = Controller(
+        name="ctrl1", sensor=sensor_a, quantity="T [K]",
+        component=comp, free_param="N",
+        value=lambda s: sensor_b.report_metrics(s)["T [K]"],
+    )
+
+    P, T_a, T_b = 300000.0, 400.0, 355.0
+    state = _FakeState(
+        fluid=AIR,
+        mdot={"sa.tap": 1.0, "sb.tap": 1.0},
+        node_values={
+            "sa.tap": (P, AIR.enthalpy_pt(P, T_a)),
+            "sb.tap": (P, AIR.enthalpy_pt(P, T_b)),
+        },
+    )
+    metrics = ctrl.report_metrics(state)
+    assert math.isclose(metrics["target [-]"], T_b, rel_tol=1e-9)
+    assert math.isclose(metrics["measured [-]"], T_a, rel_tol=1e-9)

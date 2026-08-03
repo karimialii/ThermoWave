@@ -18,7 +18,8 @@ class SteamTurbine(BaseComponent):
     Entropy-based: s_in = entropy_ph(P_in, h_in); h_out_isentropic =
     enthalpy_ps(P_out, s_in); the actual work is eta_s * (h_in -
     h_out_isentropic). Requires a fluid exposing entropy_ph / enthalpy_ps
-    (CoolPropFluid), checked at residual time.
+    (CoolPropFluid, or an IdealGasFluid/IdealGasMixtureFluid via their
+    closed-form ideal-gas entropy relation), checked at residual time.
 
     Specify exactly one of P_out [Pa] (absolute exhaust pressure) or PR
     (P_in / P_out, > 1). 3 residuals: momentum, energy, mass. report_metrics
@@ -86,4 +87,6 @@ class SteamTurbine(BaseComponent):
             "eta_s [-]": self.eta_s,
             "PR [-]": P_in / P_out,
             "x_out [-]": fluid.quality_ph(P_out, h_out),
+            "T_in [K]": state.fluid_at(self._inlet_node).temperature_ph(P_in, h_in),
+            "T_out [K]": fluid.temperature_ph(P_out, h_out),
         }

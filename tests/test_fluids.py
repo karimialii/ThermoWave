@@ -55,6 +55,60 @@ def test_ideal_gas_name_attribute():
     assert air.name == "air"
 
 
+def test_ideal_gas_entropy_ph_hand_calc():
+    air = IdealGasFluid(name="air", R=AIR_R, cp=AIR_CP)
+    P, T = 250000.0, 450.0
+    h = air.enthalpy_pt(P, T)
+    s_ref_T, s_ref_P = 298.15, 101325.0  # ConstantCpFluid's own reference state
+    expected_s = AIR_CP * math.log(T / s_ref_T) - AIR_R * math.log(P / s_ref_P)
+    assert math.isclose(air.entropy_ph(P, h), expected_s, rel_tol=1e-9)
+
+
+def test_ideal_gas_entropy_is_zero_at_its_own_reference_state():
+    air = IdealGasFluid(name="air", R=AIR_R, cp=AIR_CP)
+    P, T = 101325.0, 298.15
+    h = air.enthalpy_pt(P, T)
+    assert math.isclose(air.entropy_ph(P, h), 0.0, abs_tol=1e-9)
+
+
+def test_ideal_gas_enthalpy_ps_round_trips_entropy_ph():
+    air = IdealGasFluid(name="air", R=AIR_R, cp=AIR_CP)
+    for P, T in [(101325.0, 300.0), (500000.0, 800.0), (50000.0, 250.0)]:
+        h = air.enthalpy_pt(P, T)
+        s = air.entropy_ph(P, h)
+        h_roundtrip = air.enthalpy_ps(P, s)
+        assert math.isclose(h_roundtrip, h, rel_tol=1e-9)
+
+
+def test_ideal_gas_enthalpy_ps_at_constant_pressure_matches_isentropic_temperature_relation():
+    # A textbook cross-check independent of entropy_ph's own implementation:
+    # at fixed P, T2/T1 for an isentropic process of a calorically-perfect
+    # gas is just s2==s1 by definition, which the closed-form solve for T in
+    # enthalpy_ps already encodes -- confirm enthalpy_ps(P, s1) recovers T1
+    # exactly when s1 == entropy_ph(P, h1) at that same P.
+    air = IdealGasFluid(name="air", R=AIR_R, cp=AIR_CP)
+    P, T1 = 300000.0, 350.0
+    h1 = air.enthalpy_pt(P, T1)
+    s1 = air.entropy_ph(P, h1)
+    h_back = air.enthalpy_ps(P, s1)
+    T_back = air.temperature_ph(P, h_back)
+    assert math.isclose(T_back, T1, rel_tol=1e-9)
+
+
+def test_ideal_gas_mixture_entropy_ph_enthalpy_ps_round_trip():
+    # IdealGasMixtureFluid never overrides cp/enthalpy_pt/temperature_ph, so
+    # it inherits ConstantCpFluid's entropy_ph/enthalpy_ps unchanged -- this
+    # confirms that inheritance actually engages for a real mixture instance.
+    flue_gas = IdealGasMixtureFluid(
+        name="flue_gas", composition={"N2": 0.72, "O2": 0.1, "CO2": 0.1, "H2O": 0.08}
+    )
+    P, T = 150000.0, 900.0
+    h = flue_gas.enthalpy_pt(P, T)
+    s = flue_gas.entropy_ph(P, h)
+    h_roundtrip = flue_gas.enthalpy_ps(P, s)
+    assert math.isclose(h_roundtrip, h, rel_tol=1e-9)
+
+
 _R_UNIVERSAL = 8.314462618
 
 

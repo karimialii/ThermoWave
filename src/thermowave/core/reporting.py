@@ -89,7 +89,10 @@ def finish_transient_progress(
 # components present (e.g. "generator" until a Generator component exists)
 # is simply omitted rather than printed empty.
 _CATEGORY_TABLES: list[tuple[str, str, list[str]]] = [
-    ("turbomachinery", "TurboMachinery", ["power [W]", "eta_s [-]", "PR [-]", "N [rev/min]"]),
+    (
+        "turbomachinery", "TurboMachinery",
+        ["power [W]", "eta_s [-]", "PR [-]", "N [rev/min]", "T_in [K]", "T_out [K]"],
+    ),
     (
         "heat_exchanger",
         "Heat Exchangers",
@@ -140,7 +143,7 @@ _CATEGORY_TABLES: list[tuple[str, str, list[str]]] = [
 ]
 
 
-def _table_row(cells: list[str]) -> str:
+def table_row(cells: list[str]) -> str:
     return "│".join(cells)
 
 
@@ -149,7 +152,7 @@ def _format_node_table(result: "SolveResult") -> list[str]:
     num_w = 14
     columns = ["P [Pa]", "T [K]", "h [J/kg]", "mdot [kg/s]"]
 
-    header_row = _table_row(
+    header_row = table_row(
         [f"{'node':<{node_col_w}}"] + [f"{c:>{num_w}}" for c in columns]
     )
     sep = "─" * node_col_w + "┼" + "┼".join("─" * num_w for _ in columns)
@@ -162,7 +165,7 @@ def _format_node_table(result: "SolveResult") -> list[str]:
         mdot = result.node_mdot.get(name)
         mdot_cell = "-" if mdot is None else f"{mdot:.4f}"
         lines.append(
-            _table_row(
+            table_row(
                 [f"{name:<{node_col_w}}"]
                 + [
                     f"{P:>{num_w}.2f}",
@@ -175,7 +178,7 @@ def _format_node_table(result: "SolveResult") -> list[str]:
     return lines
 
 
-def _render_metrics_table(
+def render_metrics_table(
     rows: list[tuple[str, dict[str, float]]], columns: list[str]
 ) -> list[str]:
     name_col_w = max([len("component")] + [len(name) for name, _ in rows]) + 2
@@ -186,7 +189,7 @@ def _render_metrics_table(
             return f"{'-':>{num_w}}"
         return f"{value:>{num_w}.4g}"
 
-    header_row = _table_row(
+    header_row = table_row(
         [f"{'component':<{name_col_w}}"] + [f"{col:>{num_w}}" for col in columns]
     )
     sep = "─" * name_col_w + "┼" + "┼".join("─" * num_w for _ in columns)
@@ -194,7 +197,7 @@ def _render_metrics_table(
     lines = [header_row, sep]
     for name, metrics in rows:
         lines.append(
-            _table_row([f"{name:<{name_col_w}}"] + [cell(metrics.get(col)) for col in columns])
+            table_row([f"{name:<{name_col_w}}"] + [cell(metrics.get(col)) for col in columns])
         )
     return lines
 
@@ -229,7 +232,7 @@ def _format_component_tables(result: "SolveResult") -> list[tuple[str, list[str]
     for category, title, columns in _CATEGORY_TABLES:
         rows = rows_by_category.get(category)
         if rows:
-            tables.append((title, _render_metrics_table(rows, columns)))
+            tables.append((title, render_metrics_table(rows, columns)))
     return tables
 
 

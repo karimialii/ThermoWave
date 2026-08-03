@@ -61,11 +61,14 @@ def test_enthalpy_ps_round_trips_entropy_ph():
 
 
 def test_supports_two_phase_true_for_coolprop_false_for_ideal_gas():
+    # Two-phase (saturation/quality) support is still CoolProp-only -- no
+    # saturation dome exists for a constant-cp ideal gas. Entropy support is
+    # different: IdealGasFluid gets entropy_ph/enthalpy_ps for free from
+    # ConstantCpFluid's closed-form ideal-gas relation, so it's checked
+    # separately in test_require_entropy_does_not_raise_for_ideal_gas below.
     air = IdealGasFluid(name="air", R=287.05, cp=1005.0)
     assert supports_two_phase(WATER)
-    assert supports_entropy(WATER)
     assert not supports_two_phase(air)
-    assert not supports_entropy(air)
 
 
 def test_require_two_phase_raises_for_ideal_gas():
@@ -75,8 +78,11 @@ def test_require_two_phase_raises_for_ideal_gas():
     require_two_phase(WATER, "SimpleEvaporator")  # no raise
 
 
-def test_require_entropy_raises_for_ideal_gas():
+def test_require_entropy_does_not_raise_for_ideal_gas():
+    # IdealGasFluid (a ConstantCpFluid subclass) has entropy_ph/enthalpy_ps
+    # via a closed-form ideal-gas relation -- require_entropy() duck-types
+    # on those methods existing, not on being CoolPropFluid specifically.
     air = IdealGasFluid(name="air", R=287.05, cp=1005.0)
-    with pytest.raises(ValueError, match="entropy"):
-        require_entropy(air, "Pump")
+    assert supports_entropy(air)
+    require_entropy(air, "Pump")  # no raise
     require_entropy(WATER, "Pump")  # no raise

@@ -96,3 +96,32 @@ def test_end_to_end_expands_into_wet_region_and_reports_quality():
     assert metrics["power [W]"] > 0.0
     # Expansion from superheated 10 bar to 0.1 bar lands in the wet region.
     assert 0.0 < metrics["x_out [-]"] < 1.0
+
+
+def test_accepts_ideal_gas_fluid_for_the_isentropic_path():
+    # IdealGasFluid gets entropy_ph/enthalpy_ps for free from ConstantCpFluid
+    # (a closed-form ideal-gas relation) -- SteamTurbine's require_entropy()
+    # check duck-types on those methods existing, so residuals() no longer
+    # raises for an ideal gas. This only covers residuals() (the entropy-
+    # based isentropic path); report_metrics()'s "x_out [-]" still calls
+    # quality_ph(), which IdealGasFluid doesn't have (no saturation dome) --
+    # that's a separate, still-standing limitation this change doesn't touch.
+    from thermowave.fluids.ideal_gas import IdealGasFluid
+
+    air = IdealGasFluid(name="air", R=287.05, cp=1005.0)
+    eta_s = 0.85
+    st = SteamTurbine(name="st", P_out=1.0e5, eta_s=eta_s)
+    P_in, h_in = 5.0e5, air.enthalpy_pt(5.0e5, 500.0)
+    P_out = 1.0e5
+    s_in = air.entropy_ph(P_in, h_in)
+    h_out_isentropic = air.enthalpy_ps(P_out, s_in)
+    h_out = h_in - eta_s * (h_in - h_out_isentropic)
+    state = _FakeState(
+        fluid=air,
+        node_values={"st.in": (P_in, h_in), "st.out": (P_out, h_out)},
+        mdots={"st.in": 1.0, "st.out": 1.0},
+    )
+    momentum, energy, mass = st.residuals(state)
+    assert math.isclose(momentum, 0.0, abs_tol=1e-3)
+    assert math.isclose(energy, 0.0, abs_tol=1e-6)
+    assert math.isclose(mass, 0.0, abs_tol=1e-12)

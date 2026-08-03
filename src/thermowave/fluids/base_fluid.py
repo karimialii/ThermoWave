@@ -1,4 +1,14 @@
+import math
 from abc import ABC, abstractmethod
+
+# Reference state for ConstantCpFluid's entropy_ph/enthalpy_ps below: entropy
+# needs its own finite datum (s=0 at T_ref, P_ref) separate from enthalpy's
+# own h=0-at-T=0 datum, since ideal-gas entropy diverges as T->0 or P->0.
+# Only entropy DIFFERENCES ever matter physically, so the exact values here
+# are arbitrary but fixed.
+_S_REF_T = 298.15  # K
+_S_REF_P = 101325.0  # Pa
+_S_REF = 0.0  # J/(kg*K)
 
 
 class BaseFluid(ABC):
@@ -64,3 +74,24 @@ class ConstantCpFluid(BaseFluid):
     def density_ph(self, P: float, h: float) -> float:
         T = self.temperature_ph(P, h)
         return P / (self.R * T)
+
+    def entropy_ph(self, P: float, h: float) -> float:
+        """Specific entropy [J/(kg*K)], closed-form ideal-gas relation
+        referenced to s=0 at (_S_REF_T, _S_REF_P) -- see this module's own
+        comment for why that datum is separate from enthalpy_pt's h=0-at-T=0
+        one. Gives every ConstantCpFluid subclass (IdealGasFluid,
+        IdealGasMixtureFluid) entropy/enthalpy_ps for free, which in turn
+        lets Pump/SteamTurbine's entropy-based isentropic path (and any
+        exergy calculation) work with a constant-cp ideal gas, not only
+        CoolPropFluid -- see thermowave.fluids.two_phase.require_entropy(),
+        which duck-types on these two methods existing at all.
+        """
+        T = self.temperature_ph(P, h)
+        return self._cp * math.log(T / _S_REF_T) - self.R * math.log(P / _S_REF_P) + _S_REF
+
+    def enthalpy_ps(self, P: float, s: float) -> float:
+        """Inverse of entropy_ph at fixed P: solve for T, then reuse
+        enthalpy_pt (not a re-derived cp*T) so a future subclass override of
+        enthalpy_pt stays consistent with this."""
+        T = _S_REF_T * math.exp((s - _S_REF + self.R * math.log(P / _S_REF_P)) / self._cp)
+        return self.enthalpy_pt(P, T)

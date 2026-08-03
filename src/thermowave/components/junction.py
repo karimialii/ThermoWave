@@ -20,10 +20,24 @@ class Junction(BaseComponent):
     Modeled as a zero-loss, zero-volume plenum: every outlet shares one
     common pressure (no pressure drop across the junction) and carries the
     same mass-weighted mixture enthalpy of all the inlets (perfect,
-    instantaneous mixing). Outlet mass flow is a fixed fraction of the total
-    inlet mass flow — split_fractions is a modeling input, not something
-    solved from downstream flow resistance, so it must be supplied by the
-    caller and should sum to 1.
+    instantaneous mixing). Outlet mass flow is a fraction of the total inlet
+    mass flow — each entry of split_fractions is either a fixed number you
+    supply, or None to leave it a free Newton unknown instead (the fixed
+    ones plus every free one but the last must sum to 1, the same
+    "otherwise unconstrained value" role Compressor's N=None plays for
+    shaft speed). This is exactly right for a tree (the correct fraction is
+    knowable in advance from topology and demand alone) and exactly wrong
+    for a loop (where the split between two parallel paths is only known
+    once both paths' resistances are, an unknown a real network solver has
+    to determine) — free entries exist for the latter case, where
+    something else in the network (a Setpoint tying this Junction's own
+    split to a value, or a Controller/second Setpoint tying some other
+    component's reading to another) supplies the closing equation(s) that
+    pin them down; see free_parameters()'s docstring below for exactly how
+    many and which.
+
+    split_fractions omitted entirely (the default) still means an equal,
+    fully fixed split — unchanged from before free entries existed.
 
     Junction only produces residuals for its own outlets: inlet nodes are
     owned (and already fully constrained) by whichever upstream component
@@ -63,7 +77,7 @@ class Junction(BaseComponent):
         name: str,
         n_inlets: int,
         n_outlets: int,
-        split_fractions: list[float] | None = None,
+        split_fractions: list[float | None] | None = None,
     ):
         if split_fractions is None:
             split_fractions = [1.0 / n_outlets] * n_outlets
@@ -77,6 +91,14 @@ class Junction(BaseComponent):
         self.n_inlets = n_inlets
         self.n_outlets = n_outlets
         self.split_fractions = split_fractions
+        # Every None entry is a free unknown except the last one, which is
+        # instead computed each residual call as 1 - sum(every other entry)
+        # -- see free_parameters()'s docstring for why one is deliberately
+        # excluded rather than adding an (n_outlets)-th "sums to 1" residual
+        # for it.
+        none_indices = [i for i, f in enumerate(split_fractions) if f is None]
+        self._free_indices = none_indices[:-1]
+        self._dependent_index = none_indices[-1] if none_indices else None
         self._inlet_nodes = [f"{name}.in{i}" for i in range(n_inlets)]
         self._outlet_nodes = [f"{name}.out{i}" for i in range(n_outlets)]
         # Lazily created the first time merge_fluids() actually needs to
@@ -84,6 +106,31 @@ class Junction(BaseComponent):
         # Junctions never touch Cantera at all, so importing/loading it
         # eagerly here would be pure overhead for those.
         self._mix_gas = None
+
+    def free_parameters(self) -> dict[str, float]:
+        """One entry per None in split_fractions, except the last such
+        entry (see __init__'s docstring: that one is instead computed from
+        the others each residual call, not a separate Newton unknown).
+        Named f"frac{i}" for outlet index i, e.g. a 2-outlet Junction with
+        split_fractions=[None, None] declares exactly one free parameter,
+        "frac0" — outlet 1's fraction follows as 1 - frac0, needing no
+        residual of its own. With k free entries overall, this declares
+        k - 1 unknowns, each needing its own closing equation from
+        elsewhere in the network (a Setpoint/Controller, typically); the
+        k-th is closed automatically, by construction, not by anything
+        external.
+        """
+        return {f"frac{i}": 1.0 / self.n_outlets for i in self._free_indices}
+
+    def _effective_split_fractions(self, state: "NetworkState") -> list[float]:
+        fracs = list(self.split_fractions)
+        for i in self._free_indices:
+            fracs[i] = state.param(f"{self.name}.frac{i}")
+        if self._dependent_index is not None:
+            fracs[self._dependent_index] = 1.0 - sum(
+                f for i, f in enumerate(fracs) if i != self._dependent_index
+            )
+        return fracs
 
     def ports(self) -> dict[str, str]:
         ports = {f"in{i}": node for i, node in enumerate(self._inlet_nodes)}
@@ -187,11 +234,12 @@ class Junction(BaseComponent):
             sum(mdot * h for mdot, (_, h) in zip(inlet_mdots, inlet_states)) / mdot_total_safe
         )
         P_ref = inlet_states[0][0]
+        fracs = self._effective_split_fractions(state)
 
         out: list[float] = []
         for i, node in enumerate(self._outlet_nodes):
             P_out, h_out = state.node(node)
             out.append(P_out - P_ref)
             out.append(h_out - h_mix)
-            out.append(state.mdot(node) - self.split_fractions[i] * mdot_total)
+            out.append(state.mdot(node) - fracs[i] * mdot_total)
         return out

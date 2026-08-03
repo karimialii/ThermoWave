@@ -42,16 +42,29 @@ def test_rejects_pr_not_greater_than_one():
         Pump(name="p", PR=0.5)
 
 
-def test_requires_entropy_fluid():
-    p = Pump(name="p", P_out=1.0e6)
+def test_accepts_ideal_gas_fluid():
+    # IdealGasFluid gets entropy_ph/enthalpy_ps for free from ConstantCpFluid
+    # (a closed-form ideal-gas relation) -- Pump's require_entropy() check
+    # duck-types on those methods existing, so this no longer raises. Same
+    # isentropic-rise hand calc as test_isentropic_rise_hand_calc_with_efficiency
+    # below, just with an ideal gas instead of CoolProp water.
+    eta = 0.75
+    p = Pump(name="p", P_out=1.0e6, eta=eta)
     air = IdealGasFluid(name="air", R=287.05, cp=1005.0)
+    P_in, h_in = 1.0e5, air.enthalpy_pt(1.0e5, 300.0)
+    P_out = 1.0e6
+    s_in = air.entropy_ph(P_in, h_in)
+    h_out_isentropic = air.enthalpy_ps(P_out, s_in)
+    h_out = h_in + (h_out_isentropic - h_in) / eta
     state = _FakeState(
         fluid=air,
-        node_values={"p.in": (1.0e4, 2.0e5), "p.out": (1.0e6, 2.0e5)},
+        node_values={"p.in": (P_in, h_in), "p.out": (P_out, h_out)},
         mdots={"p.in": 1.0, "p.out": 1.0},
     )
-    with pytest.raises(ValueError, match="entropy"):
-        p.residuals(state)
+    momentum, energy, mass = p.residuals(state)
+    assert math.isclose(momentum, 0.0, abs_tol=1e-3)
+    assert math.isclose(energy, 0.0, abs_tol=1e-6)
+    assert math.isclose(mass, 0.0, abs_tol=1e-12)
 
 
 def test_isentropic_rise_hand_calc_with_efficiency():

@@ -212,6 +212,8 @@ def test_turbine_report_metrics_reflects_map_lookup():
     assert math.isclose(metrics["PR [-]"], PR, rel_tol=1e-9)
     assert math.isclose(metrics["eta_s [-]"], eta_s, rel_tol=1e-9)
     assert math.isclose(metrics["power [W]"], mdot * (h_in - h_out), rel_tol=1e-9)
+    assert math.isclose(metrics["T_in [K]"], T_in, rel_tol=1e-9)
+    assert math.isclose(metrics["T_out [K]"], air.temperature_ph(P_out, h_out), rel_tol=1e-9)
 
 
 def test_turbine_free_parameters_empty_when_n_given():

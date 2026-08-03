@@ -155,4 +155,6 @@ class Compressor(BaseComponent):
             "PR [-]": P_out / P_in,
             "N [rev/min]": self._shaft_speed(state),
             "Q_loss [W]": heat_loss_watts(self.heat_path, state),
+            "T_in [K]": state.fluid_at(self._inlet_node).temperature_ph(P_in, h_in),
+            "T_out [K]": state.fluid_at(self._outlet_node).temperature_ph(P_out, h_out),
         }

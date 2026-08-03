@@ -20,7 +20,8 @@ class Pump(BaseComponent):
     h_out_isentropic = enthalpy_ps(P_out, s_in); the actual enthalpy rise is
     the isentropic rise divided by eta (inefficiency means MORE work goes in
     than the ideal reversible pump). Requires a fluid exposing entropy_ph /
-    enthalpy_ps (CoolPropFluid), checked at residual time.
+    enthalpy_ps (CoolPropFluid, or an IdealGasFluid/IdealGasMixtureFluid via
+    their closed-form ideal-gas entropy relation), checked at residual time.
 
     Specify exactly one of P_out [Pa] (absolute discharge pressure) or PR
     (P_out / P_in, > 1). 3 residuals: momentum, energy, mass.
@@ -82,4 +83,6 @@ class Pump(BaseComponent):
             "power [W]": state.mdot(self._inlet_node) * (h_out - h_in),  # work input, positive
             "eta_s [-]": self.eta,
             "PR [-]": P_out / P_in,
+            "T_in [K]": state.fluid_at(self._inlet_node).temperature_ph(P_in, h_in),
+            "T_out [K]": state.fluid_at(self._outlet_node).temperature_ph(P_out, h_out),
         }

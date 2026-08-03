@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Union
 
 import networkx as nx
 
@@ -16,6 +16,16 @@ if TYPE_CHECKING:
 # signal (controller setpoints), and heat-transfer connections are planned but
 # not yet implemented — connect() raises NotImplementedError for those kinds.
 _SUPPORTED_CONNECTION_KINDS = {"flow"}
+
+# A plain float (a fixed design target), or a callable NetworkState -> float
+# re-evaluated fresh every residual call, for tying a target to something
+# that's itself live/computed rather than a constant -- see Setpoint's own
+# docstring (components/setpoint.py) for the original rationale and an
+# example. Lives here rather than in setpoint.py so exergy.py's network-level
+# fuel/product specification (core/exergy.py) can reuse the exact same type
+# without components/* importing from core/exergy.py or vice versa -- both
+# setpoint.py and exergy.py depend downward on this module instead.
+TargetValue = Union[float, Callable[["NetworkState"], float]]
 
 
 class NetworkState:
