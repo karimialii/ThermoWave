@@ -12,7 +12,7 @@ against the **original published source**:
 > balance) are the source of every number this benchmark compares against.
 
 This plant is also the subject of a TESPy exergy-analysis example repo
-([`docs/benchmark/Tespy/SEGS_exergy-main`](../Tespy/SEGS_exergy-main)),
+([`docs/benchmark/Tespy/SEGS_exergy-main`](https://github.com/karimialii/ThermoWave/tree/main/docs/benchmark/Tespy/SEGS_exergy-main)),
 which was run this session for cross-checking. Per the scope asked for
 here, **the comparison below is ThermoWave vs. the original 1995 paper
 only** — TESPy's own numbers are deliberately not part of it. See

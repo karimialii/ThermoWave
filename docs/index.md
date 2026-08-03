@@ -36,6 +36,7 @@ result.print_report()
 | **[Tutorials](tutorials/index.md)** | Step-by-step guides that build a complete model from scratch — start here if you're building your first network. |
 | **[Examples](examples/index.md)** | Short, runnable snippets for common patterns — a single flow branch, a recuperated cycle, a PID control loop. |
 | **[Components](components/index.md)** | Every component's ports, governing equations, and free parameters, with a labeled diagram for each. |
+| **[Benchmarks](benchmark/index.md)** | Full network models checked against real published plant/rig data, not synthetic test cases. |
 | **[API reference](api.md)** | Auto-generated reference for every public class and function. |
 
 ## Why ThermoWave
@@ -81,5 +82,6 @@ Source and issue tracker: [github.com/karimialii/ThermoWave](https://github.com/
 tutorials/index
 examples/index
 components/index
+benchmark/index
 api
 ```

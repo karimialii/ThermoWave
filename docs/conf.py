@@ -46,7 +46,16 @@ source_suffix = {
 }
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "superpowers"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "superpowers",
+    # Vendored third-party reference repos (kept for benchmark provenance,
+    # not part of this project's own docs) -- excluding them stops Sphinx
+    # from picking up their README.md as an orphan page.
+    "benchmark/Tespy",
+]
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
