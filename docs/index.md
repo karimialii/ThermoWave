@@ -39,6 +39,7 @@ result.print_report()
 | **[Benchmarks](benchmark/index.md)** | Full network models checked against real published plant/rig data, not synthetic test cases. |
 | **[API reference](api.md)** | Auto-generated reference for every public class and function. |
 | **[Changelog](changelog.md)** | What changed release to release, including migration notes for breaking changes. |
+| **[Contributing](contributing.md)** | Dev environment setup, the checks CI runs, and what a good PR looks like. |
 
 ## Why ThermoWave
 
@@ -76,6 +77,16 @@ pip install "thermowave[full]"       # everything, including dev/test tooling
 
 Source and issue tracker: [github.com/karimialii/ThermoWave](https://github.com/karimialii/ThermoWave).
 
+## Contributing
+
+Bug reports, feature requests, and pull requests are welcome — see
+[Contributing](contributing.md) for dev setup and PR guidelines, and the
+[Code of Conduct](code_of_conduct.md) for community standards.
+
+## License
+
+ThermoWave is [MIT licensed](https://github.com/karimialii/ThermoWave/blob/main/LICENSE).
+
 ```{toctree}
 :maxdepth: 2
 :hidden:
@@ -86,4 +97,6 @@ components/index
 benchmark/index
 api
 changelog
+contributing
+code_of_conduct
 ```

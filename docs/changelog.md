@@ -4,6 +4,23 @@ Notable changes to ThermoWave, in reverse chronological order. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to the `[project] version` in `pyproject.toml`.
 
+## 0.8.1 — 2026-08-04
+
+### Added
+
+- **Contributor infrastructure.** `CONTRIBUTING.md` (dev setup, the
+  `pytest`/`ruff`/`mypy` commands CI runs, PR conventions),
+  `CODE_OF_CONDUCT.md` (Contributor Covenant), and `SECURITY.md` (private
+  vulnerability reporting), each mirrored on Read the Docs via
+  [Contributing](contributing.md) and [Code of Conduct](code_of_conduct.md).
+- CI/Docs/License/Python badges on the README.
+
+### Fixed
+
+- README "Future development" roadmap no longer lists CI and
+  `[project.urls]` as outstanding — both landed with 0.8.0's CI workflow
+  and haven't been reflected in the doc until now.
+
 ## 0.8.0 — 2026-08-04
 
 ### Added

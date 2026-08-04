@@ -1,5 +1,10 @@
 # ThermoWave
 
+[![CI](https://github.com/karimialii/ThermoWave/actions/workflows/ci.yml/badge.svg)](https://github.com/karimialii/ThermoWave/actions/workflows/ci.yml)
+[![Docs](https://readthedocs.org/projects/thermowave/badge/?version=latest)](https://thermowave.readthedocs.io/en/latest/?badge=latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+
 A headless, 1D implicit thermodynamic network solver for steady-state
 thermal-fluid systems. You build a network out of components (sources, pipes,
 valves, compressors, turbines, heat exchangers, combustors, shafts, sensors,
@@ -820,9 +825,19 @@ Where I'm taking this next, in roughly the order I plan to tackle it:
   representation yet. This is the biggest lift on this list (it likely
   needs the solver's own unknown-discovery pass to handle a genuine
   fixed-point over composition, not just P/h/mdot), so it's planned last.
-- **CI.** Tests and `ruff`/`mypy` (already in the `dev` extra) aren't wired
-  into a GitHub Actions workflow yet — on my list before the next few
-  releases pile up without it.
-- **`[project.urls]` in `pyproject.toml`.** Small, but the PyPI project
-  page has no link back to this repository yet — fixing that alongside the
-  CI setup.
+- **CI — landed.** `pytest`, `ruff check`, and `mypy` (the last
+  non-blocking until the pre-existing type debt is paid down) run on every
+  push and pull request against Python 3.10/3.11/3.12
+  (`.github/workflows/ci.yml`).
+- **`[project.urls]` in `pyproject.toml` — landed.** The PyPI project page
+  now links back to the repository, issue tracker, and homepage.
+
+## Contributing
+
+Bug reports, feature requests, and pull requests are welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to set up a dev environment, the
+test/lint/type-check commands CI runs, and what a good PR looks like.
+
+## License
+
+[MIT](LICENSE) — see the LICENSE file for the full text.
