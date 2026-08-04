@@ -15,11 +15,12 @@ _RAD_PER_MIN_TO_RAD_PER_S = 2.0 * math.pi / 60.0
 class Generator(BaseComponent):
     """Generator driven by a speed-vs-torque characteristic map.
 
-    Has no flow ports of its own — like SimpleGenerator, it's a passive
-    reader of a shaft component's own report_metrics()["N [rev/min]"] (e.g.
-    a Turbine's shaft speed). Mechanical power available at that speed comes
-    from the map's own torque curve rather than from the shaft component's
-    reported power:
+    Has no flow ports of its own -- like SimpleGenerator, it's a passive
+    reader of shaft speed, but reads it through a real "shaft" mechanical
+    port instead of holding a direct object reference: wire it with
+    network.connect(generator, "shaft", turbine, "shaft", kind="mechanical").
+    Mechanical power available at that speed comes from the map's own
+    torque curve rather than from the shaft component's reported power:
         omega = N * 2*pi/60
         power_mech = map.torque(N) * omega
         power_elec = power_mech * efficiency
@@ -28,23 +29,31 @@ class Generator(BaseComponent):
     if the map is a mechanical/shaft rating and electrical losses still need
     to be applied on top of it.) Contributes zero residuals: it doesn't feed
     back into or constrain the thermodynamic solve, only reports a derived
-    quantity from it.
+    quantity from it. Also exposes a "power" signal port publishing the same
+    electrical output, for anything downstream that wants to read it via
+    kind="signal" instead of report_metrics().
     """
 
     def __init__(
         self,
         name: str,
-        component: BaseComponent,
         map_path: str,
         efficiency: float = 1.0,
     ):
         self.name = name
-        self.component = component
         self.map = TorqueSpeedMap.from_file(map_path)
         self.efficiency = efficiency
+        self._shaft_port = f"{name}.shaft"
+        self._power_port = f"{name}.power"
 
     def ports(self) -> dict[str, str]:
         return {}
+
+    def mechanical_ports(self) -> dict[str, str]:
+        return {"shaft": self._shaft_port}
+
+    def signal_ports(self) -> dict[str, str]:
+        return {"power": self._power_port}
 
     def report_category(self) -> str:
         return "generator"
@@ -52,20 +61,21 @@ class Generator(BaseComponent):
     def residuals(self, state: "NetworkState") -> list[float]:
         return []
 
-    def report_metrics(self, state: "NetworkState") -> dict[str, float]:
-        shaft_metrics = self.component.report_metrics(state)
-        if shaft_metrics is None or "N [rev/min]" not in shaft_metrics:
-            raise ValueError(
-                f"Generator {self.name!r} reads shaft speed from "
-                f"{self.component.name!r}, but its report_metrics() doesn't "
-                f"expose 'N [rev/min]' (got: {sorted(shaft_metrics) if shaft_metrics else []})"
-            )
-        N = shaft_metrics["N [rev/min]"]
+    def _power(self, state: "NetworkState") -> tuple[float, float]:
+        N = state.N(self._shaft_port)
         omega = N * _RAD_PER_MIN_TO_RAD_PER_S
         torque = self.map.torque(N)
         power_mech = torque * omega
+        return N, power_mech * self.efficiency
+
+    def provided_signal_values(self, state: "NetworkState") -> dict[str, float]:
+        _, power_elec = self._power(state)
+        return {self._power_port: power_elec}
+
+    def report_metrics(self, state: "NetworkState") -> dict[str, float]:
+        N, power_elec = self._power(state)
         return {
-            "power [W]": power_mech * self.efficiency,
+            "power [W]": power_elec,
             "eta [-]": self.efficiency,
             "N [rev/min]": N,
         }

@@ -20,11 +20,14 @@ class _FakeHeatPath:
 class _FakeState:
     """Minimal stand-in for core.network.NetworkState."""
 
-    def __init__(self, fluid, mdot, node_values: dict[str, tuple[float, float]], params=None):
+    def __init__(
+        self, fluid, mdot, node_values: dict[str, tuple[float, float]], params=None, node_N=None
+    ):
         self.fluid = fluid
         self._mdot = mdot
         self._node_values = node_values
         self._params = params or {}
+        self._node_N = node_N or {}
 
     def node(self, name: str) -> tuple[float, float]:
         return self._node_values[name]
@@ -37,6 +40,9 @@ class _FakeState:
 
     def param(self, name: str) -> float:
         return self._params[name]
+
+    def N(self, name: str) -> float:
+        return self._node_N[name]
 
 
 def test_turbine_ports_returns_inlet_and_outlet_derived_from_name():
@@ -223,9 +229,10 @@ def test_turbine_free_parameters_empty_when_n_given():
 
 def test_turbine_free_parameters_includes_n_when_n_omitted():
     turb = Turbine(name="t1", map_path=_MAP_PATH, gamma=1.4)
-    params = turb.free_parameters()
-    assert set(params.keys()) == {"N"}
-    assert params["N"] > 0
+    mech = turb.free_mechanical_ports()
+    assert set(mech.keys()) == {"t1.shaft"}
+    assert mech["t1.shaft"] > 0
+    assert turb.fixed_mechanical_values() == {}
 
 
 def test_turbine_residuals_uses_n_from_state_param_when_n_omitted():
@@ -251,7 +258,7 @@ def test_turbine_residuals_uses_n_from_state_param_when_n_omitted():
             "t1.in": (P_in, h_in),
             "t1.out": (P_out, h_out),
         },
-        params={"t1.N": N},
+        node_N={"t1.shaft": N},
     )
     momentum_residual, energy_residual, mass_residual = turb.residuals(state)
     assert math.isclose(momentum_residual, 0.0, abs_tol=1e-6)

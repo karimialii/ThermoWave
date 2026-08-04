@@ -8,7 +8,7 @@ from thermowave.components.setpoint import Setpoint
 from thermowave.components.sink import Sink
 from thermowave.components.source import Source
 from thermowave.core.exceptions import NetworkTopologyError
-from thermowave.core.network import Network, NetworkState
+from thermowave.core.network import Network
 from thermowave.fluids.ideal_gas import IdealGasFluid
 
 _MAP_PATH = str(Path(__file__).parent / "fixtures" / "simple_compressor_map.cop")
@@ -20,20 +20,20 @@ def test_setpoint_raises_when_target_component_has_no_matching_free_parameter():
     comp = Compressor(name="c1", map_path=_MAP_PATH, N=3000.0, gamma=1.4)  # N fixed, not free
     with pytest.raises(ValueError, match="doesn't currently declare"):
         Setpoint(
-            name="sp1", component=comp, free_param="N", target_metric="PR [-]", value=3.0
+            name="sp1", component=comp, free_param="shaft", target_metric="PR [-]", value=3.0
         )
 
 
 def test_setpoint_ports_is_empty():
     comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=1.4)  # N left free
-    sp = Setpoint(name="sp1", component=comp, free_param="N", target_metric="PR [-]", value=3.0)
+    sp = Setpoint(name="sp1", component=comp, free_param="shaft", target_metric="PR [-]", value=3.0)
     assert sp.ports() == {}
 
 
 def test_setpoint_residuals_is_metric_minus_value():
     comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=1.4)
     sp = Setpoint(
-        name="sp1", component=comp, free_param="N", target_metric="power [W]", value=500.0
+        name="sp1", component=comp, free_param="shaft", target_metric="power [W]", value=500.0
     )
 
     class _FakeComponentState:
@@ -54,7 +54,7 @@ def test_setpoint_drives_compressor_pr_target_end_to_end():
     src = Source(name="src", P=101325.0, T=300.0, mdot=2.0 * 1.01325 / math.sqrt(300.0))
     comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=gamma)  # N left free
     sp = Setpoint(
-        name="sp1", component=comp, free_param="N", target_metric="PR [-]", value=3.0
+        name="sp1", component=comp, free_param="shaft", target_metric="PR [-]", value=3.0
     )
     snk = Sink(name="snk")
 
@@ -66,13 +66,7 @@ def test_setpoint_drives_compressor_pr_target_end_to_end():
 
     result = network.solve(tol=1e-8, max_iter=100, verbose=False)
     assert result.converged
-    state = NetworkState(
-        fluid=result.fluid,
-        node_P=result.node_P,
-        node_h=result.node_h,
-        node_mdot=result.node_mdot,
-        params=result.params,
-    )
+    state = result.state()
     metrics = comp.report_metrics(state)
     assert math.isclose(metrics["PR [-]"], 3.0, rel_tol=1e-4)
 
@@ -98,7 +92,7 @@ def test_network_solve_verbose_prints_system_summary(capsys):
     src = Source(name="src", P=101325.0, T=300.0, mdot=2.0 * 1.01325 / math.sqrt(300.0))
     comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=gamma)
     sp = Setpoint(
-        name="sp1", component=comp, free_param="N", target_metric="PR [-]", value=3.0
+        name="sp1", component=comp, free_param="shaft", target_metric="PR [-]", value=3.0
     )
     snk = Sink(name="snk")
 
@@ -117,7 +111,7 @@ def test_network_solve_verbose_prints_system_summary(capsys):
 def test_setpoint_accepts_callable_value_evaluated_live():
     comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=1.4)
     sp = Setpoint(
-        name="sp1", component=comp, free_param="N", target_metric="power [W]",
+        name="sp1", component=comp, free_param="shaft", target_metric="power [W]",
         value=lambda s: s.reference_power,
     )
 
@@ -137,7 +131,7 @@ def test_setpoint_accepts_callable_value_evaluated_live():
 def test_setpoint_report_metrics_evaluates_callable_target():
     comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=1.4)
     sp = Setpoint(
-        name="sp1", component=comp, free_param="N", target_metric="power [W]",
+        name="sp1", component=comp, free_param="shaft", target_metric="power [W]",
         value=lambda s: 100.0,
     )
 

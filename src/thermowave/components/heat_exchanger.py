@@ -15,15 +15,33 @@ _MIN_MDOT = 1.0e-9  # kg/s, floor for the Q/mdot energy-residual divisions below
 _ARRANGEMENTS = ("counterflow", "parallel", "crossflow", "shell_and_tube", "custom")
 
 
-class MultiPassHeatExchanger(BaseComponent):
-    """Two-stream heat exchanger with effectiveness derived from geometry
-    (UA, flow arrangement) instead of taken directly as an input — the
-    geometry-based counterpart to SimpleHeatExchanger, the way map-based
-    Compressor replaced SimpleCompressor's fixed PR/eta.
+class HeatExchanger(BaseComponent):
+    """Two-stream heat exchanger: fixed effectiveness, or effectiveness
+    derived from geometry (UA, flow arrangement), auto-selected by which one
+    you give.
 
-    Single-pass effectiveness comes from the standard effectiveness-NTU
-    relations (Cmin = min(mdot*cp) on each side, Cr = Cmin/Cmax,
-    NTU = UA/Cmin):
+    Four ports: hot_in/hot_out and cold_in/cold_out, both streams sharing the
+    Network's single fluid model (no distinct hot/cold fluids yet -- same
+    limitation as every other component here).
+
+    Give exactly one of `effectiveness` (fixed-effectiveness mode -- a
+    datasheet or an existing exchanger's known performance rating) or `UA`
+    (NTU/geometry mode -- effectiveness derived from geometry and a flow
+    arrangement, the way a map-based Compressor replaces SimpleCompressor's
+    fixed PR/eta). `n_passes`/`arrangement`/`correlation` only apply in UA
+    mode; passing any of them alongside `effectiveness` is an error.
+
+    Fixed-effectiveness mode:
+        C_hot = mdot_hot * cp_hot, C_cold = mdot_cold * cp_cold (cp evaluated
+        at each side's own inlet state), Cmin = min(C_hot, C_cold), and
+        Q = effectiveness * Cmin * (T_hot_in - T_cold_in)
+    Q is not clamped to be >= 0: a network wired with the "hot" side actually
+    colder than the "cold" side just yields Q <= 0 (heat flowing the other
+    way), rather than being silently forced to zero.
+
+    UA/NTU mode: single-pass effectiveness comes from the standard
+    effectiveness-NTU relations (Cmin = min(mdot*cp) on each side,
+    Cr = Cmin/Cmax, NTU = UA/Cmin):
         counterflow: eff = (1-exp(-NTU*(1-Cr))) / (1-Cr*exp(-NTU*(1-Cr)))
                      (eff = NTU/(1+NTU) at Cr == 1)
         parallel:    eff = (1-exp(-NTU*(1+Cr))) / (1+Cr)
@@ -32,7 +50,7 @@ class MultiPassHeatExchanger(BaseComponent):
 
     For "counterflow"/"parallel"/"crossflow", n_passes > 1 chains that many
     such stages in series along both streams (UA split n_passes ways, one
-    set of internal nodes per stream — same n_elem discretization idea Pipe
+    set of internal nodes per stream -- same n_elem discretization idea Pipe
     already uses, generalized to two streams), each stage's outlet feeding
     the next stage's inlet. For "counterflow", the two streams are chained
     in opposite physical order (stage 0 is the hot inlet's end and the cold
@@ -41,9 +59,9 @@ class MultiPassHeatExchanger(BaseComponent):
 
     Be aware of what n_passes does and doesn't buy you for those three
     arrangements: with uniform mdot/cp/UA along the exchanger (the only case
-    this component models — no per-pass property variation), chaining n
+    this component models -- no per-pass property variation), chaining n
     counterflow (or n parallel) stages in series is mathematically
-    *identical* to one stage of the same total UA — subdividing an exact
+    *identical* to one stage of the same total UA -- subdividing an exact
     closed-form solution along a fixed flow direction doesn't change it, so
     n_passes=1..N give the same effectiveness for those two arrangements.
     It's not a no-op for "crossflow": the Incropera correlation above is
@@ -59,9 +77,9 @@ class MultiPassHeatExchanger(BaseComponent):
     "shell_and_tube" is the genuine reversing-header multi-pass case (real
     shell-and-tube exchanger hardware): n_passes here means the number of
     *shell* passes N (each shell pass internally has 2 tube passes, tube
-    fluid reversing direction once per shell — the standard "1-2N" TEMA
-    configuration), not a discretization count, and — unlike the three
-    arrangements above — n_passes genuinely changes the answer here, via a
+    fluid reversing direction once per shell -- the standard "1-2N" TEMA
+    configuration), not a discretization count, and -- unlike the three
+    arrangements above -- n_passes genuinely changes the answer here, via a
     real closed-form F-correction-factor effectiveness relation (Bowman,
     Mueller & Nagle 1940, as given in Incropera): one shell pass' own
     effectiveness is
@@ -71,15 +89,15 @@ class MultiPassHeatExchanger(BaseComponent):
     across the N shells), and N shells combine in series as
         eff = [((1-eff_1*Cr)/(1-eff_1))^N - 1] / [((1-eff_1*Cr)/(1-eff_1))^N - Cr]
     (eff = N*eff_1 / (1+(N-1)*eff_1) at Cr == 1), which reduces to exactly
-    eff_1 at N=1 and, as N grows, approaches the true counterflow limit —
+    eff_1 at N=1 and, as N grows, approaches the true counterflow limit --
     the real physical behavior a genuine multi-pass shell-and-tube exchanger
     has, unlike the other three arrangements' n_passes. No internal
     discretization nodes are created for this arrangement (the tube-side
     reversal is captured analytically by the formula, not modeled as a
-    physical node chain) — see internal_nodes().
+    physical node chain) -- see internal_nodes().
 
     "custom" plugs in a user-supplied effectiveness correlation instead of one
-    of the three built-in staged arrangements above — pass
+    of the three built-in staged arrangements above -- pass
     `correlation=Callable[[NTU, Cr], float]` (same (NTU, Cr) -> effectiveness
     signature as `_effectiveness()`) for a plate-fin/finned-tube/vendor
     correlation without adding a new named preset here. It chains n_passes
@@ -89,53 +107,73 @@ class MultiPassHeatExchanger(BaseComponent):
     arrangements. `correlation` is required when `arrangement="custom"` and
     must be omitted otherwise.
 
-    Each side's pressure drop is still a fixed ratio (PR_hot/PR_cold, same
-    style as SimpleHeatExchanger) — for "counterflow"/"parallel"/
-    "crossflow", split evenly in log space across passes
-    (PR_hot**(1/n_passes) per stage) so the overall ratio across the whole
-    cascade multiplies back out to PR_hot exactly; for "shell_and_tube",
-    applied once across the whole exchanger (there's no per-stage node chain
-    to split it across).
+    Each side's pressure drop is a simple fixed pressure ratio (P_out =
+    PR * P_in, same style as SimpleCompressor/SimpleTurbine), not a K-factor
+    loss model, in either mode. In UA/staged mode it's split evenly in log
+    space across passes (PR_hot**(1/n_passes) per stage) so the overall
+    ratio across the whole cascade multiplies back out to PR_hot exactly;
+    for "shell_and_tube", applied once across the whole exchanger (there's
+    no per-stage node chain to split it across).
     """
 
     def __init__(
         self,
         name: str,
-        UA: float,
         PR_hot: float,
         PR_cold: float,
+        effectiveness: Optional[float] = None,
+        UA: Optional[float] = None,
         n_passes: int = 1,
         arrangement: str = "counterflow",
         correlation: Optional[Callable[[float, float], float]] = None,
     ):
-        if UA <= 0:
-            raise ValueError(f"MultiPassHeatExchanger {name!r}: UA must be > 0, got {UA}")
+        if (effectiveness is None) == (UA is None):
+            raise ValueError(
+                f"HeatExchanger {name!r}: give exactly one of effectiveness "
+                f"(fixed-effectiveness mode) or UA (NTU/geometry mode), not both "
+                f"and not neither (got effectiveness={effectiveness!r}, UA={UA!r})"
+            )
         if PR_hot <= 0:
-            raise ValueError(f"MultiPassHeatExchanger {name!r}: PR_hot must be > 0, got {PR_hot}")
+            raise ValueError(f"HeatExchanger {name!r}: PR_hot must be > 0, got {PR_hot}")
         if PR_cold <= 0:
-            raise ValueError(
-                f"MultiPassHeatExchanger {name!r}: PR_cold must be > 0, got {PR_cold}"
-            )
-        if n_passes < 1:
-            raise ValueError(
-                f"MultiPassHeatExchanger {name!r}: n_passes must be >= 1, got {n_passes}"
-            )
-        if arrangement not in _ARRANGEMENTS:
-            raise ValueError(
-                f"MultiPassHeatExchanger {name!r}: arrangement must be one of "
-                f"{_ARRANGEMENTS}, got {arrangement!r}"
-            )
-        if arrangement == "custom" and correlation is None:
-            raise ValueError(
-                f"MultiPassHeatExchanger {name!r}: correlation is required when "
-                f"arrangement='custom'"
-            )
-        if arrangement != "custom" and correlation is not None:
-            raise ValueError(
-                f"MultiPassHeatExchanger {name!r}: correlation is only used when "
-                f"arrangement='custom', got arrangement={arrangement!r}"
-            )
+            raise ValueError(f"HeatExchanger {name!r}: PR_cold must be > 0, got {PR_cold}")
+
+        if effectiveness is not None:
+            if not (0.0 <= effectiveness <= 1.0):
+                raise ValueError(
+                    f"HeatExchanger {name!r}: effectiveness must be in [0, 1], "
+                    f"got {effectiveness}"
+                )
+            if n_passes != 1 or arrangement != "counterflow" or correlation is not None:
+                raise ValueError(
+                    f"HeatExchanger {name!r}: n_passes/arrangement/correlation only apply "
+                    f"in UA mode (UA given); got effectiveness mode instead."
+                )
+            self._mode = "effectiveness"
+        else:
+            if UA <= 0:
+                raise ValueError(f"HeatExchanger {name!r}: UA must be > 0, got {UA}")
+            if n_passes < 1:
+                raise ValueError(f"HeatExchanger {name!r}: n_passes must be >= 1, got {n_passes}")
+            if arrangement not in _ARRANGEMENTS:
+                raise ValueError(
+                    f"HeatExchanger {name!r}: arrangement must be one of "
+                    f"{_ARRANGEMENTS}, got {arrangement!r}"
+                )
+            if arrangement == "custom" and correlation is None:
+                raise ValueError(
+                    f"HeatExchanger {name!r}: correlation is required when "
+                    f"arrangement='custom'"
+                )
+            if arrangement != "custom" and correlation is not None:
+                raise ValueError(
+                    f"HeatExchanger {name!r}: correlation is only used when "
+                    f"arrangement='custom', got arrangement={arrangement!r}"
+                )
+            self._mode = "ua"
+
         self.name = name
+        self.effectiveness = effectiveness
         self.UA = UA
         self.PR_hot = PR_hot
         self.PR_cold = PR_cold
@@ -159,10 +197,10 @@ class MultiPassHeatExchanger(BaseComponent):
         return "heat_exchanger"
 
     def internal_nodes(self) -> list[str]:
-        if self.arrangement == "shell_and_tube":
-            # The tube-side reversal per shell pass is captured analytically
-            # by _effectiveness_shell_and_tube() below, not modeled as a
-            # physical node chain -- see this class's own docstring.
+        if self._mode == "effectiveness" or self.arrangement == "shell_and_tube":
+            # Fixed-effectiveness mode is always a single lumped duty calc
+            # (no per-pass chain); shell_and_tube captures its multi-pass
+            # behavior analytically -- see this class's own docstring.
             return []
         return [f"{self.name}__hot_mid{i}" for i in range(1, self.n_passes)] + [
             f"{self.name}__cold_mid{i}" for i in range(1, self.n_passes)
@@ -182,10 +220,16 @@ class MultiPassHeatExchanger(BaseComponent):
     def guess_outlet_for_pair(
         self, pair: tuple[str, str], P_in: float, h_in: float, mdot: float
     ) -> tuple[float, float]:
-        # Same crude fixed-swing rationale as SimpleHeatExchanger's own
-        # override — see its docstring: each pair is warm-started
-        # independently, without both sides' inlet guesses on hand at once
-        # to run the real per-pass duty calculation.
+        # Each pair is warm-started independently (the solver's propagation
+        # loop doesn't have both sides' inlet guesses on hand at once to run
+        # the real duty calculation), so this is a crude fixed-swing
+        # stand-in, not the actual effectiveness-weighted duty: recuperators
+        # in this class of machine typically preheat the cold (compressor-
+        # discharge) side and cool the hot (turbine-exhaust) side by several
+        # hundred K, so a same-order-of-magnitude guess in the right
+        # direction is enough to keep downstream map-based components (e.g.
+        # a combustor + turbine on the cold side) from starting Newton at a
+        # wildly wrong operating point.
         if pair == ("cold_in", "cold_out"):
             return self.PR_cold * P_in, h_in + 4.0e5
         if pair == ("hot_in", "hot_out"):
@@ -194,8 +238,15 @@ class MultiPassHeatExchanger(BaseComponent):
 
     @staticmethod
     def _smooth_min(a: float, b: float, eps: float = _C_SMOOTHING_EPS) -> float:
-        # See SimpleHeatExchanger._smooth_min's docstring for why this is
-        # needed instead of the exact min(a, b).
+        # min(a, b) is exact but non-differentiable at a == b -- a Newton
+        # solve landing there (e.g. both sides' warm-started mdot guesses
+        # defaulting to the same flat value, which happens easily once mass
+        # flow is a free unknown rather than fixed) gets an ill-conditioned
+        # or outright singular finite-difference Jacobian right at that
+        # point, independent of any variable scaling. This C1-smooth
+        # approximation (exact min(a, b) away from the kink, blended over a
+        # width of eps right at a == b) is the standard fix for exactly this
+        # kind of switching non-smoothness in equation-oriented solvers.
         return 0.5 * (a + b) - 0.5 * ((a - b) ** 2 + eps**2) ** 0.5
 
     def _effectiveness(self, NTU: float, Cr: float) -> float:
@@ -241,14 +292,63 @@ class MultiPassHeatExchanger(BaseComponent):
             cold_a, cold_b = cold_chain[i], cold_chain[i + 1]
         return hot_a, hot_b, cold_a, cold_b
 
+    def _duty_fixed_effectiveness(self, state: "NetworkState") -> float:
+        P_hot_in, h_hot_in = state.node(self._hot_in_node)
+        P_cold_in, h_cold_in = state.node(self._cold_in_node)
+        hot_fluid = state.fluid_at(self._hot_in_node)
+        cold_fluid = state.fluid_at(self._cold_in_node)
+        T_hot_in = hot_fluid.temperature_ph(P_hot_in, h_hot_in)
+        T_cold_in = cold_fluid.temperature_ph(P_cold_in, h_cold_in)
+
+        mdot_hot = state.mdot(self._hot_in_node)
+        mdot_cold = state.mdot(self._cold_in_node)
+        cp_hot = hot_fluid.cp(P_hot_in, T_hot_in)
+        cp_cold = cold_fluid.cp(P_cold_in, T_cold_in)
+
+        C_hot = max(mdot_hot * cp_hot, _MIN_C)
+        C_cold = max(mdot_cold * cp_cold, _MIN_C)
+        C_min = self._smooth_min(C_hot, C_cold)
+
+        return self.effectiveness * C_min * (T_hot_in - T_cold_in)
+
     def residuals(self, state: "NetworkState") -> list[float]:
+        if self._mode == "effectiveness":
+            return self._residuals_fixed_effectiveness(state)
         if self.arrangement == "shell_and_tube":
             return self._residuals_shell_and_tube(state)
         return self._residuals_staged(state)
 
+    def _residuals_fixed_effectiveness(self, state: "NetworkState") -> list[float]:
+        Q = self._duty_fixed_effectiveness(state)
+
+        P_hot_in, h_hot_in = state.node(self._hot_in_node)
+        P_hot_out, h_hot_out = state.node(self._hot_out_node)
+        P_cold_in, h_cold_in = state.node(self._cold_in_node)
+        P_cold_out, h_cold_out = state.node(self._cold_out_node)
+
+        mdot_hot = state.mdot(self._hot_in_node)
+        mdot_cold = state.mdot(self._cold_in_node)
+
+        hot_momentum_residual = P_hot_out - self.PR_hot * P_hot_in
+        hot_energy_residual = h_hot_out - (h_hot_in - Q / max(mdot_hot, _MIN_MDOT))
+        hot_mass_residual = state.mdot(self._hot_out_node) - mdot_hot
+
+        cold_momentum_residual = P_cold_out - self.PR_cold * P_cold_in
+        cold_energy_residual = h_cold_out - (h_cold_in + Q / max(mdot_cold, _MIN_MDOT))
+        cold_mass_residual = state.mdot(self._cold_out_node) - mdot_cold
+
+        return [
+            hot_momentum_residual,
+            hot_energy_residual,
+            hot_mass_residual,
+            cold_momentum_residual,
+            cold_energy_residual,
+            cold_mass_residual,
+        ]
+
     def _residuals_shell_and_tube(self, state: "NetworkState") -> list[float]:
-        # Single overall duty calc (like SimpleHeatExchanger) rather than
-        # the staged per-pass chain below -- the N-shell F-correction
+        # Single overall duty calc (like fixed-effectiveness mode) rather
+        # than the staged per-pass chain below -- the N-shell F-correction
         # formula already accounts for the whole multi-pass exchanger
         # analytically, so there's no separate per-stage node chain to
         # solve through (see internal_nodes() and this class's own
@@ -358,11 +458,39 @@ class MultiPassHeatExchanger(BaseComponent):
         Q_max = C_min * (T_hot_in - T_cold_in)
 
         Q = mdot_hot * (h_hot_in - h_hot_out)
+        effectiveness = Q / Q_max if abs(Q_max) > _MIN_C else 0.0
         return {
             "power [W]": Q,
-            "effectiveness [-]": Q / Q_max if abs(Q_max) > _MIN_C else 0.0,
+            "effectiveness [-]": effectiveness,
             "T_hot_in [K]": T_hot_in,
             "T_cold_in [K]": T_cold_in,
             "PR_hot [-]": self.PR_hot,
             "PR_cold [-]": self.PR_cold,
         }
+
+
+class MultiPassHeatExchanger(HeatExchanger):
+    """UA/NTU-mode HeatExchanger, kept as its own explicit, always-UA-mode
+    class for callers who want that guarantee at the type level. No math is
+    duplicated -- see HeatExchanger for the full model.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        UA: float,
+        PR_hot: float,
+        PR_cold: float,
+        n_passes: int = 1,
+        arrangement: str = "counterflow",
+        correlation: Optional[Callable[[float, float], float]] = None,
+    ):
+        super().__init__(
+            name,
+            PR_hot,
+            PR_cold,
+            UA=UA,
+            n_passes=n_passes,
+            arrangement=arrangement,
+            correlation=correlation,
+        )

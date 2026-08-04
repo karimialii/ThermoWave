@@ -38,13 +38,18 @@ class Turbine(BaseComponent):
 
     N is the shaft speed [rev/min]. Give it directly, or leave it None to
     drive the turbine by some other known quantity instead (a target power,
-    a target PR, ...) — N then becomes an extra Newton unknown (via
-    free_parameters(), seeded from the map's own mid-speed) and needs a
+    a target PR, ...) — N then becomes an extra Newton unknown (via a free
+    mechanical port, seeded from the map's own mid-speed) and needs a
     matching residual from somewhere else in the network to pin it down,
-    e.g. a Setpoint component tying report_metrics()["power [W]"] to a
-    target. There's still no shaft/mechanical network connection: N is
-    either given directly or solved purely from residuals contributed
-    elsewhere, not coupled to any other component's speed.
+    e.g. a Setpoint targeting this turbine's "shaft" port, or a Shaft tying
+    it to another machine's speed via
+    network.connect(turbine, "shaft", other, "shaft", kind="mechanical").
+    An unconnected turbine still gets its own private mechanical node (no
+    different from before this port existed) — connecting it to nothing is
+    exactly today's behavior. This also exposes a "power" signal port (see
+    provided_signal_values()) reporting the same value as
+    report_metrics()["power [W]"], for a Generator/Shaft to read via
+    kind="signal" instead of holding a direct object reference.
 
     factor_overrides: optional dict overriding any of the map file's own
     conversion factors (A_fact, B_fact, C_fact, E_fact — see
@@ -83,9 +88,17 @@ class Turbine(BaseComponent):
         self.heat_path = heat_path
         self._inlet_node = f"{name}.in"
         self._outlet_node = f"{name}.out"
+        self._shaft_port = f"{name}.shaft"
+        self._power_port = f"{name}.power"
 
     def ports(self) -> dict[str, str]:
         return {"in": self._inlet_node, "out": self._outlet_node}
+
+    def mechanical_ports(self) -> dict[str, str]:
+        return {"shaft": self._shaft_port}
+
+    def signal_ports(self) -> dict[str, str]:
+        return {"power": self._power_port}
 
     def report_category(self) -> str:
         return "turbomachinery"
@@ -96,25 +109,35 @@ class Turbine(BaseComponent):
         # order of magnitude (see BaseComponent.guess_outlet's docstring).
         return P_in / 2.0, h_in
 
-    def free_parameters(self) -> dict[str, float]:
+    def fixed_mechanical_values(self) -> dict[str, float]:
+        if self.N is None:
+            return {}
+        return {self._shaft_port: self.N}
+
+    def free_mechanical_ports(self) -> dict[str, float]:
         if self.N is not None:
             return {}
         N_guess = self.map.mid_speed() * N_GUESS_T_FALLBACK**0.5 * 60.0
-        return {"N": N_guess}
+        return {self._shaft_port: N_guess}
 
-    def guess_free_parameters(
+    def guess_free_mechanical_ports(
         self, fluid: "BaseFluid", P_in: float, h_in: float, mdot: float
     ) -> dict[str, float]:
         if self.N is not None:
             return {}
         T_in = fluid.temperature_ph(P_in, h_in)
         N_guess = self.map.mid_speed() * T_in**0.5 * 60.0
-        return {"N": N_guess}
+        return {self._shaft_port: N_guess}
+
+    def provided_signal_values(self, state: "NetworkState") -> dict[str, float]:
+        P_in, h_in = state.node(self._inlet_node)
+        _, h_out = state.node(self._outlet_node)
+        return {self._power_port: state.mdot(self._inlet_node) * (h_in - h_out)}
 
     def _shaft_speed(self, state: "NetworkState") -> float:
         if self.N is not None:
             return self.N
-        return state.param(f"{self.name}.N")
+        return state.N(self._shaft_port)
 
     def _gamma(self, state: "NetworkState", P_in: float, T_in: float) -> float:
         if self.gamma is not None:

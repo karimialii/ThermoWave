@@ -49,13 +49,12 @@ from typing import TYPE_CHECKING
 from thermowave.components.compressor import Compressor
 from thermowave.components.electric_motor import ElectricMotor
 from thermowave.components.generator import Generator
-from thermowave.components.multi_pass_heat_exchanger import MultiPassHeatExchanger
+from thermowave.components.heat_exchanger import HeatExchanger, MultiPassHeatExchanger
 from thermowave.components.pump import Pump
 from thermowave.components.shaft import Shaft
 from thermowave.components.shaft_load import ShaftLoad
 from thermowave.components.simple_compressor import SimpleCompressor
 from thermowave.components.simple_generator import SimpleGenerator
-from thermowave.components.simple_heat_exchanger import SimpleHeatExchanger
 from thermowave.components.simple_turbine import SimpleTurbine
 from thermowave.components.steam_turbine import SteamTurbine
 from thermowave.components.turbine import Turbine
@@ -70,7 +69,9 @@ if TYPE_CHECKING:
 
 _EXPANDERS = (Turbine, SimpleTurbine, SteamTurbine)  # work OUT is the product
 _COMPRESSION = (Compressor, SimpleCompressor, Pump)  # work IN is the fuel
-_TWO_STREAM_HX = (SimpleHeatExchanger, MultiPassHeatExchanger)
+_TWO_STREAM_HX = (HeatExchanger, MultiPassHeatExchanger)  # MultiPassHeatExchanger is a
+# HeatExchanger subclass, so isinstance already covers it -- listed explicitly for clarity.
+# The single-stream SimpleHeatExchanger is NOT here: it has no hot_in/cold_in ports.
 _POWER_ONLY = (Shaft, ShaftLoad, ElectricMotor, Generator, SimpleGenerator)
 _SINGLE_STREAM_PHASE_CHANGE_PORTS = ("in", "out")  # SimpleEvaporator/SimpleCondenser
 
@@ -313,7 +314,7 @@ def exergy_report(
     E_D + E_L) is the caller's responsibility, the same posture Setpoint's
     own docstring takes about closing a free parameter.
 
-    dissipative: component names (must be SimpleHeatExchanger or
+    dissipative: component names (must be HeatExchanger or
     MultiPassHeatExchanger instances in this network) whose cold-side gain
     isn't a useful product -- e.g. a cooler dumping heat to ambient cooling
     water. Their E_P is reported as None and their whole E_F is tallied
@@ -341,7 +342,7 @@ def exergy_report(
         if target is None or not isinstance(target, _TWO_STREAM_HX):
             raise ValueError(
                 f"exergy_report(dissipative=...) names {name!r}, but that isn't a "
-                f"SimpleHeatExchanger/MultiPassHeatExchanger component in this network."
+                f"HeatExchanger/MultiPassHeatExchanger component in this network."
             )
 
     state = result.state()

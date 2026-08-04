@@ -111,3 +111,14 @@ def test_flat_import_gives_the_same_object_as_the_module_path():
     )
 
     assert SimpleHeatExchanger is FromModule
+
+
+def test_flat_import_gives_the_same_object_as_the_module_path_for_heat_exchanger():
+    from thermowave.components import HeatExchanger, MultiPassHeatExchanger
+    from thermowave.components.heat_exchanger import (
+        HeatExchanger as FromModule,
+        MultiPassHeatExchanger as MultiPassFromModule,
+    )
+
+    assert HeatExchanger is FromModule
+    assert MultiPassHeatExchanger is MultiPassFromModule

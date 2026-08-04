@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from thermowave.components.multi_pass_heat_exchanger import MultiPassHeatExchanger
+from thermowave.components.heat_exchanger import MultiPassHeatExchanger
 from thermowave.components.sink import Sink
 from thermowave.components.source import Source
 from thermowave.core.network import Network, NetworkState

@@ -7,10 +7,12 @@ products to find outlet temperature, instead of a fixed LHV (see
 [`SimpleCombustor`](simple-combustor.md)). Requires the optional `cantera`
 extra.
 
-**Ports:** `in`, `out` &nbsp;·&nbsp; **Parameters:** `PR` (default 0.97),
+**Ports:** `in`, `out` (plus `fuel_in` if `use_fuel_port=True`, below)
+&nbsp;·&nbsp; **Parameters:** `PR` (default 0.97),
 `efficiency` (default 1.0), `mdot_fuel` (leave `None` to solve for it),
 `fuel` (default `"CH4"`), `oxidizer` (default `"O2:0.21, N2:0.79"`),
-`mechanism` (default `"gri30.yaml"`, GRI-Mech 3.0), `heat_path` (optional)
+`mechanism` (default `"gri30.yaml"`, GRI-Mech 3.0), `heat_path` (optional),
+`use_fuel_port` (default `False`)
 
 At residual-evaluation time, the inlet air and fuel are mixed by mass in the
 ratio `mdot_fuel/mdot_in` and equilibrated at constant enthalpy and pressure
@@ -33,6 +35,20 @@ P_\text{out} - PR\cdot P_\text{in} = 0
 \qquad
 h_\text{out} - h(P_\text{out}, T_\text{out,target}) + \frac{Q_\text{loss}}{\dot m_\text{out}} = 0
 $$
+
+**`use_fuel_port`** — same idea as [`SimpleCombustor`](simple-combustor.md)'s
+flag: `False` (default) mixes fuel (the `fuel` composition string) with the
+air inlet at the air's own `(T_in, P_in)`, and `mdot_fuel` is a scalar
+(fixed-or-free) parameter, not a port. `True` adds a genuine `fuel_in`
+port — connect a real fuel-supply branch to it (`Source → Pipe →
+combustor`); `mdot_fuel` is then read directly from that branch's own
+solved flow, `mdot_fuel`/`free_parameters()` become no-ops, and two further
+improvements apply on top of `SimpleCombustor`'s equivalent mode: if the
+fuel port's resolved fluid is itself Cantera-flavored (exposes
+`mass_fractions()`/`mechanism` — the same duck-typed check
+[`Junction`](../flow-elements/junction.md)'s mixing uses), its actual
+composition is used instead of the `fuel` string; and the fuel stream is
+evaluated at its own connected `(P, h)` instead of the air inlet's.
 
 **Composition propagation.** When the combustor's own inlet fluid is a
 `CanteraFluid`, the reacted product composition feeds back into the network

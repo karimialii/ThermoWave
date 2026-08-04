@@ -2,36 +2,34 @@
 
 <img src="../../_static/diagrams/simple_heat_exchanger.svg" alt="SimpleHeatExchanger diagram" style="max-width:100%">
 
-A two-stream, 0D heat exchanger with a fixed effectiveness rating — the way
-a datasheet or an existing exchanger's known performance would be given.
+Single-stream heat addition/removal, 0D model: one fluid network, one duty
+`Q` — not a two-stream exchanger (see [`HeatExchanger`](heat-exchanger.md)
+for that). It's the "apply `Q` to this stream" building block, e.g. a
+heater/cooler/duty specified directly rather than derived from a second
+stream's own state.
 
-**Ports:** `hot_in`, `hot_out`, `cold_in`, `cold_out` &nbsp;·&nbsp;
-**Parameters:** `effectiveness`, `PR_hot`, `PR_cold`
+**Ports:** `in`, `out` &nbsp;·&nbsp;
+**Parameters:** `Q`, `PR`
 
 $$
-C_\text{hot} = \dot m_\text{hot}\,c_{p,\text{hot}}
+P_\text{out} - PR\,P_\text{in} = 0
 \qquad
-C_\text{cold} = \dot m_\text{cold}\,c_{p,\text{cold}}
-\qquad
-C_\text{min} = \min(C_\text{hot}, C_\text{cold})
+h_\text{out} - \left(h_\text{in} + \frac{Q}{\dot m}\right) = 0
 $$
 
-$$
-Q = \varepsilon \cdot C_\text{min} \cdot (T_\text{hot,in} - T_\text{cold,in})
-$$
+`Q` [W]: positive heats the fluid, negative cools it — give it directly, or
+leave it `None` to make it a free Newton unknown, closed by a
+`Setpoint`/`Controller`/`PIDController` targeting some downstream quantity
+(the same free-parameter pattern as `Combustor`'s `mdot_fuel`). Not clamped
+either way; a `Q` that drives the outlet temperature outside the fluid
+model's valid range fails the same way any other component's residuals
+would.
 
-$$
-P_\text{hot,out} - PR_\text{hot}\,P_\text{hot,in} = 0
-\qquad
-h_\text{hot,out} - \left(h_\text{hot,in} - \frac{Q}{\dot m_\text{hot}}\right) = 0
-$$
+Pressure drop is a simple fixed ratio (`P_out = PR * P_in`, same style as
+`SimpleCompressor`/`SimpleTurbine`), not a K-factor loss model.
 
-(and the mirror pair on the cold side, with `+Q/mdot_cold`). `Q` is not
-clamped to `≥ 0` — a network wired with the "hot" side actually colder than
-the "cold" side just yields negative `Q` (heat flowing the other way).
-
-For effectiveness derived from geometry (`UA` + flow arrangement) instead of
-given directly, see [`MultiPassHeatExchanger`](multi-pass-heat-exchanger.md).
+For a two-stream exchanger (hot side transferring heat to a cold side, no
+`Q` given directly), see [`HeatExchanger`](heat-exchanger.md).
 
 ---
 Part of [Heat exchangers & phase change](index.md).

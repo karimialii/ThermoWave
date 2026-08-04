@@ -2,10 +2,15 @@
 
 The components that couple turbomachinery together mechanically, and that
 convert mechanical shaft power to and from electrical power. None of these
-have flow ports — they read other components' `report_metrics()` and/or
-contribute speed-tie residuals, rather than moving fluid. See
+have flow ports — they couple through **mechanical** (`kind="mechanical"`,
+a shared shaft speed `N`) and **signal** (`kind="signal"`, a scalar one
+component computes and another reads, e.g. power) ports instead, wired with
+`network.connect(a, "shaft", b, "shaft", kind="mechanical")` /
+`network.connect(a, "power", b, "power", kind="signal")` the same way flow
+ports are, rather than holding direct object references. See
 [Turbomachinery](../turbomachinery/index.md) for the compressors/turbines/
-pumps these attach to.
+pumps these attach to (`Turbine`/`Compressor` expose their own `"shaft"`
+mechanical port and `"power"` signal port).
 
 ```{toctree}
 :maxdepth: 1

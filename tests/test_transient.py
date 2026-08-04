@@ -13,7 +13,7 @@ from thermowave.components.sink import Sink
 from thermowave.components.source import Source
 from thermowave.components.turbine import Turbine
 from thermowave.core.exceptions import ConvergenceError
-from thermowave.core.network import Network, NetworkState
+from thermowave.core.network import Network
 from thermowave.fluids.ideal_gas import IdealGasFluid
 
 AIR = IdealGasFluid(name="air", R=287.05, cp=1005.0)
@@ -31,7 +31,7 @@ def _build_dynamic_turboshaft(N0: float = 60000.0, inertia: float = 0.05):
     # assertion below is unchanged from when this said 0.98 — which is
     # exactly the point of the warning.
     shaft = Shaft(
-        name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
+        name="shaft", members=[comp, turb], signs=[-1.0, 1.0],
         efficiency=1.0, inertia=inertia, dynamic=True, N0=N0,
     )
     snk = Sink(name="snk")
@@ -43,6 +43,10 @@ def _build_dynamic_turboshaft(N0: float = 60000.0, inertia: float = 0.05):
     network.connect(comp, "out", heater, "in")
     network.connect(heater, "out", turb, "in")
     network.connect(turb, "out", snk, "in")
+    network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
+    network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
+    network.connect(shaft, "p0", comp, "power", kind="signal")
+    network.connect(shaft, "p1", turb, "power", kind="signal")
     return network, shaft
 
 
@@ -108,11 +112,7 @@ def test_solve_transient_off_equilibrium_initial_condition_satisfies_backward_eu
     assert math.isclose(N0, 50000.0)
     assert N1 > N0  # below equilibrium -> net positive torque -> speeds up
 
-    state = NetworkState(
-        fluid=history.steps[1].fluid, node_P=history.steps[1].node_P,
-        node_h=history.steps[1].node_h, node_mdot=history.steps[1].node_mdot,
-        params=history.steps[1].params,
-    )
+    state = history.steps[1].state()
     rate = shaft.state_derivative(state)["N"]
     assert math.isclose((N1 - N0) / dt, rate, rel_tol=1e-4)
 
@@ -171,7 +171,7 @@ def test_solve_transient_adaptive_requires_a_differential_state():
     sensor = Sensor(name="s1")
     snk = Sink(name="snk")
     pid = PIDController(
-        name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
+        name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft",
         setpoint=420.0, Kp=60.0, Ki=50.0, Kd=0.0, output0=60000.0,
     )
     network = Network(fluid=AIR)
@@ -226,7 +226,7 @@ def test_solve_transient_adaptive_calls_step_once_per_accepted_step_with_accepte
     sensor = Sensor(name="s1")
     snk2 = Sink(name="snk2")
     pid = PIDController(
-        name="pid", sensor=sensor, quantity="T [K]", component=comp2, free_param="N",
+        name="pid", sensor=sensor, quantity="T [K]", component=comp2, free_param="shaft",
         setpoint=420.0, Kp=60.0, Ki=50.0, Kd=0.0, output0=60000.0,
     )
     for component in (src2, comp2, sensor, pid, snk2):

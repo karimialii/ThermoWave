@@ -63,7 +63,24 @@ class Combustor(BaseComponent):
     mdot_fuel [kg/s]: give it directly, or leave it None to drive the
     combustor by some other known quantity instead (same free-parameter /
     Setpoint-or-Controller pattern as Compressor's N — see SimpleCombustor's
-    docstring for the mechanism).
+    docstring for the mechanism). Ignored when use_fuel_port=True.
+
+    use_fuel_port: same idea as SimpleCombustor's own flag. False (default):
+    unchanged behavior above -- fuel is a composition string (`fuel`) mixed
+    at the air inlet's own (T_in, P_in), and mdot_fuel is a scalar
+    (fixed-or-free) parameter, not a port. True: a genuine third port
+    ("fuel_in") is added -- connect a real fuel-supply branch to it (e.g.
+    Source -> Pipe -> combustor); mdot_fuel is then read directly from that
+    port's own solved mdot (state.mdot(fuel_in)), and `mdot_fuel`/
+    free_parameters() are no-ops. Two further improvements this port
+    enables, on top of SimpleCombustor's equivalent mode: if the fuel port's
+    resolved fluid is itself Cantera-flavored (exposes mass_fractions()/
+    mechanism -- the same duck-typed check Junction.merge_fluids() uses,
+    e.g. a Source on a Cantera-fluid network, or an upstream component that
+    already changed composition), its actual mass fractions are used
+    instead of the `fuel` string; otherwise the `fuel` string is still used
+    as a fallback. The fuel stream is also evaluated at its own connected
+    (P, h) instead of assuming it enters at the air inlet's T/P.
 
     heat_path: optional Convection/Conduction/Radiation
     (thermowave.components.heat_transfer) representing heat lost through
@@ -89,6 +106,7 @@ class Combustor(BaseComponent):
         oxidizer: str = "O2:0.21, N2:0.79",
         mechanism: str = "gri30.yaml",
         heat_path: BaseComponent | None = None,
+        use_fuel_port: bool = False,
     ):
         try:
             import cantera as ct
@@ -106,8 +124,10 @@ class Combustor(BaseComponent):
         self.oxidizer = oxidizer
         self.mechanism = mechanism
         self.heat_path = heat_path
+        self.use_fuel_port = use_fuel_port
         self._inlet_node = f"{name}.in"
         self._outlet_node = f"{name}.out"
+        self._fuel_in_node = f"{name}.fuel_in"
         # ct.Solution(mechanism) parses the whole mechanism file (GRI-Mech
         # 3.0's default is 53 species/325 reactions) — loaded once here and
         # reused by every _equilibrate() call instead of re-parsing it from
@@ -126,25 +146,30 @@ class Combustor(BaseComponent):
         self._product_gas = ct.Solution(mechanism)
 
     def ports(self) -> dict[str, str]:
-        return {"in": self._inlet_node, "out": self._outlet_node}
+        ports = {"in": self._inlet_node, "out": self._outlet_node}
+        if self.use_fuel_port:
+            ports["fuel_in"] = self._fuel_in_node
+        return ports
 
     def report_category(self) -> str:
         return "combustor"
 
     def _fuel_flow(self, state: "NetworkState") -> float:
+        if self.use_fuel_port:
+            return state.mdot(self._fuel_in_node)
         if self.mdot_fuel is not None:
             return self.mdot_fuel
         return state.param(f"{self.name}.mdot_fuel")
 
     def free_parameters(self) -> dict[str, float]:
-        if self.mdot_fuel is not None:
+        if self.use_fuel_port or self.mdot_fuel is not None:
             return {}
         return {"mdot_fuel": MDOT_FUEL_GUESS_FRACTION}
 
     def guess_free_parameters(
         self, fluid: "BaseFluid", P_in: float, h_in: float, mdot: float
     ) -> dict[str, float]:
-        if self.mdot_fuel is not None:
+        if self.use_fuel_port or self.mdot_fuel is not None:
             return {}
         return {"mdot_fuel": MDOT_FUEL_GUESS_FRACTION * mdot}
 
@@ -155,19 +180,44 @@ class Combustor(BaseComponent):
         return self.PR * P_in, h_in
 
     def guess_outlet_mdot(self, pair: tuple[str, str], mdot_in: float) -> float:
+        if self.use_fuel_port:
+            # Fuel arrives through its own port/node with its own mdot
+            # unknown, not folded into this pair's inlet->outlet guess.
+            return mdot_in
         fuel_guess = self.mdot_fuel if self.mdot_fuel is not None else MDOT_FUEL_GUESS_FRACTION * mdot_in
         return mdot_in + fuel_guess
 
-    def _equilibrate(self, T_in: float, P_in: float, mdot_air: float, mdot_fuel: float):
+    def _equilibrate(
+        self,
+        T_in: float,
+        P_in: float,
+        mdot_air: float,
+        mdot_fuel: float,
+        T_fuel: float | None = None,
+        P_fuel: float | None = None,
+        fuel_fluid: "BaseFluid | None" = None,
+    ):
         ct = self._ct
         gas = self._gas
+        if T_fuel is None:
+            T_fuel = T_in
+        if P_fuel is None:
+            P_fuel = P_in
 
         air = ct.Quantity(gas, constant="HP")
         air.TPX = T_in, P_in, self.oxidizer
         air.mass = mdot_air
 
         fuel_stream = ct.Quantity(gas, constant="HP")
-        fuel_stream.TPX = T_in, P_in, f"{self.fuel}:1.0"
+        if fuel_fluid is not None:
+            # The fuel port's own resolved composition (see this class's
+            # own docstring on use_fuel_port) instead of the `fuel:1.0`
+            # mole-fraction string -- trusts the actual node fluid over a
+            # hardcoded default, the same principle outlet_fluid() already
+            # applies for the air side.
+            fuel_stream.TPY = T_fuel, P_fuel, fuel_fluid.mass_fractions()
+        else:
+            fuel_stream.TPX = T_fuel, P_fuel, f"{self.fuel}:1.0"
         fuel_stream.mass = mdot_fuel
 
         mixture = air + fuel_stream
@@ -203,7 +253,24 @@ class Combustor(BaseComponent):
             mdot_in = state.mdot(self._inlet_node)
             mdot_fuel = self._fuel_flow(state)
             T_in = inlet_fluid.temperature_ph(P_in, h_in)
-            state._cache[key] = self._equilibrate(T_in, P_in, mdot_in, mdot_fuel)
+
+            T_fuel, P_fuel, fuel_fluid = None, None, None
+            if self.use_fuel_port:
+                P_fuel, h_fuel = state.node(self._fuel_in_node)
+                candidate = state.fluid_at(self._fuel_in_node)
+                T_fuel = candidate.temperature_ph(P_fuel, h_fuel)
+                if hasattr(candidate, "mass_fractions") and hasattr(candidate, "mechanism"):
+                    # The fuel port's own resolved composition instead of
+                    # the `fuel:1.0` mole-fraction string -- trusts the
+                    # actual node fluid over a hardcoded default. Not
+                    # Cantera-flavored (e.g. a plain Source on a
+                    # non-Cantera network) falls back to the `fuel` string,
+                    # still evaluated at the fuel port's own (P, h).
+                    fuel_fluid = candidate
+
+            state._cache[key] = self._equilibrate(
+                T_in, P_in, mdot_in, mdot_fuel, T_fuel=T_fuel, P_fuel=P_fuel, fuel_fluid=fuel_fluid
+            )
         return state._cache[key]
 
     def _make_product_fluid(self, mixture) -> "_CanteraCompositionFluid":

@@ -208,16 +208,7 @@ def _format_component_tables(result: "SolveResult") -> list[tuple[str, list[str]
     (Source, Sink, and Pipe report no category and are left out entirely).
     Returns [] if no component has anything to report.
     """
-    from thermowave.core.network import NetworkState
-
-    state = NetworkState(
-        fluid=result.fluid,
-        node_P=result.node_P,
-        node_h=result.node_h,
-        node_mdot=result.node_mdot,
-        params=result.params,
-        node_fluid=result.node_fluid,
-    )
+    state = result.state()
 
     rows_by_category: dict[str, list[tuple[str, dict[str, float]]]] = {}
     for component in result.components:

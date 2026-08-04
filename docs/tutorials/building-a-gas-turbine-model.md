@@ -42,7 +42,7 @@ downstream (see *Composition-aware fluid propagation* in the README). An
 
 ```python
 from thermowave.components import (
-    Combustor, Compressor, Sensor, SimpleHeatExchanger, Sink, Source, Turbine,
+    Combustor, Compressor, HeatExchanger, Sensor, Sink, Source, Turbine,
 )
 
 GAMMA = 1.4
@@ -50,7 +50,7 @@ P_AMB, T_AMB = 101325.0, 288.15
 
 src   = Source(name="src", P=P_AMB, T=T_AMB, mdot=None, mdot_guess=0.7)
 comp  = Compressor(name="comp", map_path="your-compressor.cop", gamma=GAMMA, N=None)
-recup = SimpleHeatExchanger(name="recup", effectiveness=0.85, PR_hot=0.98, PR_cold=0.97)
+recup = HeatExchanger(name="recup", effectiveness=0.85, PR_hot=0.98, PR_cold=0.97)
 comb  = Combustor(name="comb", PR=0.96, mdot_fuel=None, fuel="CH4")
 turb  = Turbine(name="turb", map_path="your-turbine.tur", gamma=GAMMA, N=None)
 tot   = Sensor(name="tot")          # turbine outlet temperature tap
@@ -61,11 +61,11 @@ snk   = Sink(name="snk", P=P_AMB)
 `mdot_fuel=None` each turn that quantity into a Newton unknown, and each then
 needs exactly one equation to close it (step 5).
 
-**Ordering matters more than it looks.** `Shaft.__init__` and
-`PIDController.__init__` both *read* a component's free parameters at
-construction time to decide what they're coupling. A compressor built with a
-numeric `N` is silently treated as a torque-only shaft member rather than a
-speed-tied one, so build the turbomachines with `N=None` first.
+**`Shaft` and `PIDController` no longer read a component's free parameters at
+construction time** — mechanical coupling is real port wiring now (`N` lives
+on each turbomachine's own `"shaft"` port), so build order doesn't matter the
+way it used to; what matters is wiring every mechanical/signal port
+explicitly after `add_component()` (below).
 
 ## 3. Shaft and load
 
@@ -76,15 +76,28 @@ ETA_GEN, ETA_MECH = 0.96, 0.98
 
 load  = ShaftLoad(name="load", power=75_000.0, efficiency=ETA_GEN * ETA_MECH)
 shaft = Shaft(
-    name="shaft", components=[comp, turb, load], signs=[-1.0, 1.0, -1.0],
+    name="shaft", members=[comp, turb, load], signs=[-1.0, 1.0, -1.0],
     efficiency=1.0, inertia=0.05, dynamic=True, N0=62_000.0,
 )
 ```
 
 `signs` follows power flow: turbine `+1` (delivers), compressor `-1` (absorbs),
 load `-1` (draws). Two indexing rules that differ inside one constructor:
-`signs` has one entry per entry in `components`, but `gear_ratios` has one per
-*speed-tied* member only.
+`signs` has one entry per entry in `members`, but `gear_ratios` has one per
+*speed-tied* member only (`load` has no `"shaft"` mechanical port, so it's
+torque-only and doesn't count).
+
+Every member's `"shaft"`/`"power"` ports need explicit wiring — `Shaft`
+exposes one mechanical port (`"m0"`, `"m1"`, ...) per speed-tied member and
+one signal port (`"p0"`, `"p1"`, ...) per member, in `members` order:
+
+```python
+network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
+network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
+network.connect(shaft, "p0", comp, "power", kind="signal")
+network.connect(shaft, "p1", turb, "power", kind="signal")
+network.connect(shaft, "p2", load, "power", kind="signal")
+```
 
 Use `ShaftLoad`, not `SimpleGenerator`, on a dynamic shaft. `SimpleGenerator` is
 a passive reader — it reports power but exerts no torque, so it never closes the

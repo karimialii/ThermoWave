@@ -22,6 +22,7 @@ from thermowave.components.drum import Drum
 from thermowave.components.electric_motor import ElectricMotor
 from thermowave.components.evaporator import Evaporator
 from thermowave.components.generator import Generator
+from thermowave.components.heat_exchanger import HeatExchanger, MultiPassHeatExchanger
 from thermowave.components.heat_transfer import (
     Conduction,
     Convection,
@@ -32,7 +33,6 @@ from thermowave.components.heat_transfer import (
     normalized_heat_paths,
 )
 from thermowave.components.junction import Junction
-from thermowave.components.multi_pass_heat_exchanger import MultiPassHeatExchanger
 from thermowave.components.nozzle import Nozzle
 from thermowave.components.pid_controller import PIDController
 from thermowave.components.pipe import Pipe
@@ -69,6 +69,7 @@ __all__ = [
     "ElectricMotor",
     "Evaporator",
     "Generator",
+    "HeatExchanger",
     "Junction",
     "MultiPassHeatExchanger",
     "Nozzle",

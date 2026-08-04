@@ -64,7 +64,7 @@ starting point before a real machine map is available.
 from thermowave.core.network import Network
 from thermowave.fluids.ideal_gas import IdealGasFluid
 from thermowave.components import (
-    Source, SimpleCompressor, SimpleHeatExchanger, SimpleCombustor,
+    Source, SimpleCompressor, HeatExchanger, SimpleCombustor,
     SimpleTurbine, Sink, Setpoint,
 )
 
@@ -73,7 +73,7 @@ net = Network(fluid=air)
 
 src = Source(name="src", P=101_325.0, T=288.15, mdot=1.0)
 comp = SimpleCompressor(name="comp", PR=4.0, eta_s=0.80)
-recup = SimpleHeatExchanger(name="recup", effectiveness=0.80, PR_hot=0.98, PR_cold=0.98)
+recup = HeatExchanger(name="recup", effectiveness=0.80, PR_hot=0.98, PR_cold=0.98)
 comb = SimpleCombustor(name="comb", LHV=50e6, mdot_fuel=None)
 turb = SimpleTurbine(name="turb", PR=3.8, eta_s=0.85)
 snk = Sink(name="snk", P=101_325.0)

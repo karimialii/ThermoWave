@@ -51,9 +51,16 @@ class ShaftLoad(BaseComponent):
         self.name = name
         self.power = power
         self.efficiency = efficiency
+        self._power_port = f"{name}.power"
 
     def ports(self) -> dict[str, str]:
         return {}
+
+    def signal_ports(self) -> dict[str, str]:
+        return {"power": self._power_port}
+
+    def provided_signal_values(self, state: "NetworkState") -> dict[str, float]:
+        return {self._power_port: self.power / self.efficiency}
 
     def report_category(self) -> str:
         return "shaft_load"

@@ -79,11 +79,16 @@ class PIDController(BaseComponent):
         output_max: float | None = None,
         feedforward: "Callable[[NetworkState], float] | None" = None,
     ):
-        if free_param not in component.free_parameters():
+        mech_ports = component.mechanical_ports()
+        self._mechanical = (
+            free_param in mech_ports and mech_ports[free_param] in component.free_mechanical_ports()
+        )
+        if not self._mechanical and free_param not in component.free_parameters():
             raise ValueError(
                 f"PIDController {name!r} actuates {component.name!r}.{free_param}, but "
-                f"that component doesn't currently declare {free_param!r} as free — "
-                f"pass None for it at construction so it becomes a solvable unknown."
+                f"that component doesn't currently declare {free_param!r} as a free "
+                f"parameter or a free mechanical port — pass None for it at "
+                f"construction so it becomes a solvable unknown."
             )
 
         self.name = name
@@ -112,7 +117,16 @@ class PIDController(BaseComponent):
         return {}
 
     def closes_parameters(self) -> list[str]:
+        if self._mechanical:
+            return []
         return [f"{self.component.name}.{self.free_param}"]
+
+    def closes_mechanical_nodes(self) -> list[str]:
+        network = getattr(self, "_network", None)
+        if not self._mechanical or network is None:
+            return []
+        port_id = self.component.mechanical_ports()[self.free_param]
+        return [network._canonical(port_id)]
 
     def report_category(self) -> str:
         return "controller"
@@ -180,7 +194,11 @@ class PIDController(BaseComponent):
         return self.output
 
     def residuals(self, state: "NetworkState") -> list[float]:
-        actual = state.param(f"{self.component.name}.{self.free_param}")
+        if self._mechanical:
+            port_id = self.component.mechanical_ports()[self.free_param]
+            actual = state.N(port_id)
+        else:
+            actual = state.param(f"{self.component.name}.{self.free_param}")
         return [actual - self.output]
 
     def report_metrics(self, state: "NetworkState") -> dict[str, float]:

@@ -8,7 +8,7 @@ from thermowave.components.schedule import Schedule
 from thermowave.components.setpoint import Setpoint
 from thermowave.components.sink import Sink
 from thermowave.components.source import Source
-from thermowave.core.network import Network, NetworkState
+from thermowave.core.network import Network
 from thermowave.fluids.ideal_gas import IdealGasFluid
 
 _MAP_PATH = str(Path(__file__).parent / "fixtures" / "simple_compressor_map.cop")
@@ -121,7 +121,7 @@ def test_schedule_drives_compressor_pr_setpoint_over_transient():
     gamma = 1005.0 / (1005.0 - 287.05)
     src = Source(name="src", P=101325.0, T=300.0, mdot=2.0 * 1.01325 / math.sqrt(300.0))
     comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=gamma)  # N left free
-    sp = Setpoint(name="sp1", component=comp, free_param="N", target_metric="PR [-]", value=3.0)
+    sp = Setpoint(name="sp1", component=comp, free_param="shaft", target_metric="PR [-]", value=3.0)
     sch = Schedule(
         name="sch1", target=sp, attr="value",
         breakpoints=[(0.0, 3.0), (5.0, 3.5)],
@@ -140,10 +140,7 @@ def test_schedule_drives_compressor_pr_setpoint_over_transient():
     history = network.solve_transient(duration=6.0, dt=1.0, tol=1e-8, max_iter=100)
 
     def _pr(step):
-        state = NetworkState(
-            fluid=step.fluid, node_P=step.node_P, node_h=step.node_h,
-            node_mdot=step.node_mdot, params=step.params,
-        )
+        state = step.state()
         return comp.report_metrics(state)["PR [-]"]
 
     assert math.isclose(_pr(history.steps[0]), 3.0, rel_tol=1e-4)

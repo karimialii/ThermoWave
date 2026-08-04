@@ -14,12 +14,18 @@ class ElectricMotor(BaseComponent):
 
     Has no flow ports of its own: like those, it's a passive reader, not
     part of the flow network. It reads a mechanical component's own
-    required report_metrics()["power [W]"] (e.g. an electrically-driven
-    Compressor's own shaft power demand, with no Turbine on its shaft to
-    supply it) and reports the electrical power that must be drawn to
-    supply it, given motor efficiency:
+    required shaft power through a "power" signal port (e.g. an
+    electrically-driven Compressor's own shaft power demand, with no
+    Turbine on its shaft to supply it), wired with
+    network.connect(motor, "power", compressor, "power", kind="signal"),
+    and reports the electrical power that must be drawn to supply it, given
+    motor efficiency:
         power_elec = shaft_power_required / efficiency
     the reverse of SimpleGenerator's power_elec = shaft_power * efficiency.
+    It also exposes its own "shaft" mechanical port -- connect it to the
+    same machine's "shaft" port (kind="mechanical") so N shows up in this
+    component's own report_metrics() too; leave it unconnected if that's
+    not needed.
 
     Contributes zero residuals: it doesn't feed back into or constrain the
     thermodynamic solve, only reports a derived quantity from it — the
@@ -33,17 +39,24 @@ class ElectricMotor(BaseComponent):
     for that).
     """
 
-    def __init__(self, name: str, component: BaseComponent, efficiency: float):
+    def __init__(self, name: str, efficiency: float):
         if not (0.0 < efficiency <= 1.0):
             raise ValueError(
                 f"ElectricMotor {name!r}: efficiency must be in (0, 1], got {efficiency}"
             )
         self.name = name
-        self.component = component
         self.efficiency = efficiency
+        self._shaft_port = f"{name}.shaft"
+        self._power_port = f"{name}.power"
 
     def ports(self) -> dict[str, str]:
         return {}
+
+    def mechanical_ports(self) -> dict[str, str]:
+        return {"shaft": self._shaft_port}
+
+    def signal_ports(self) -> dict[str, str]:
+        return {"power": self._power_port}
 
     def report_category(self) -> str:
         return "motor"
@@ -52,15 +65,10 @@ class ElectricMotor(BaseComponent):
         return []
 
     def report_metrics(self, state: "NetworkState") -> dict[str, float]:
-        mech_metrics = self.component.report_metrics(state)
-        if mech_metrics is None or "power [W]" not in mech_metrics:
-            raise ValueError(
-                f"ElectricMotor {self.name!r} reads required shaft power from "
-                f"{self.component.name!r}, but its report_metrics() doesn't "
-                f"expose 'power [W]' (got: {sorted(mech_metrics) if mech_metrics else []})"
-            )
-        shaft_power = mech_metrics["power [W]"]
+        shaft_power = state.signal(self._power_port)
         metrics = {"power [W]": shaft_power / self.efficiency, "eta [-]": self.efficiency}
-        if "N [rev/min]" in mech_metrics:
-            metrics["N [rev/min]"] = mech_metrics["N [rev/min]"]
+        try:
+            metrics["N [rev/min]"] = state.N(self._shaft_port)
+        except KeyError:
+            pass
         return metrics

@@ -61,8 +61,23 @@ def test_network_connect_rejects_unsupported_kind():
     snk = Sink(name="snk")
     network.add_component(src)
     network.add_component(snk)
-    with pytest.raises(NotImplementedError, match="mechanical"):
-        network.connect(src, "out", snk, "in", kind="mechanical")
+    with pytest.raises(NotImplementedError, match="heat"):
+        network.connect(src, "out", snk, "in", kind="heat")
+
+
+def test_network_connect_accepts_mechanical_and_signal_kinds():
+    network = Network(fluid=AIR)
+    src = Source(name="src", P=101325.0, T=300.0, mdot=1.0)
+    snk = Sink(name="snk")
+    network.add_component(src)
+    network.add_component(snk)
+    # Neither Source nor Sink has a "shaft"/"power" port, but connect() only
+    # needs the kind itself to be recognized -- port resolution is a
+    # separate failure mode (NetworkTopologyError), not NotImplementedError.
+    with pytest.raises(Exception):
+        network.connect(src, "shaft", snk, "shaft", kind="mechanical")
+    with pytest.raises(Exception):
+        network.connect(src, "power", snk, "power", kind="signal")
 
 
 def test_network_all_nodes_includes_ports_and_internal_nodes():

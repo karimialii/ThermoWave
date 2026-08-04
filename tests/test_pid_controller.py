@@ -15,10 +15,11 @@ GAMMA = 1005.0 / (1005.0 - 287.05)
 
 
 class _FakeState:
-    def __init__(self, fluid, node_values, params=None):
+    def __init__(self, fluid, node_values, params=None, node_N=None):
         self.fluid = fluid
         self._node_values = node_values
         self._params = params or {}
+        self._node_N = node_N or {}
 
     def node(self, name):
         return self._node_values[name]
@@ -32,12 +33,15 @@ class _FakeState:
     def param(self, name):
         return self._params[name]
 
+    def N(self, name):
+        return self._node_N[name]
+
 
 def _make_pid(**overrides):
     comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
     sensor = Sensor(name="s1")
     kwargs = dict(
-        name="pid1", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
+        name="pid1", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft",
         setpoint=420.0, Kp=60.0, Ki=50.0, Kd=0.0, output0=60000.0,
     )
     kwargs.update(overrides)
@@ -54,7 +58,7 @@ def test_pid_raises_if_free_param_not_declared_free():
     sensor = Sensor(name="s1")
     with pytest.raises(ValueError, match="doesn't currently declare"):
         PIDController(
-            name="pid1", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
+            name="pid1", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft",
             setpoint=420.0, Kp=1.0,
         )
 
@@ -66,7 +70,7 @@ def test_pid_ports_is_empty():
 
 def test_pid_residual_pins_actual_free_param_to_current_output():
     pid, comp, _ = _make_pid()
-    state = _FakeState(fluid=AIR, node_values={}, params={"c1.N": 55000.0})
+    state = _FakeState(fluid=AIR, node_values={}, node_N={"c1.shaft": 55000.0})
     pid.output = 55000.0
     assert math.isclose(pid.residuals(state)[0], 0.0, abs_tol=1e-9)
 
@@ -137,7 +141,7 @@ def test_pid_controller_drives_compressor_outlet_temperature_over_transient():
 
     target_T = 420.0
     pid = PIDController(
-        name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
+        name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft",
         setpoint=target_T, Kp=60.0, Ki=50.0, Kd=0.0,
         output0=60000.0, output_min=10000.0, output_max=100000.0,
     )

@@ -58,12 +58,21 @@ def _build_engine(load_watts=5_000.0, heat_input=-400_000.0):
     # cancel. On the load it scales a one-way draw and actually carries.
     load = ShaftLoad(name="load", power=load_watts, efficiency=ETA_GEN * ETA_MECH)
     shaft = Shaft(
-        name="shaft", components=[comp, turb, load], signs=[-1.0, 1.0, -1.0],
+        name="shaft", members=[comp, turb, load], signs=[-1.0, 1.0, -1.0],
         efficiency=1.0, inertia=0.05, dynamic=True, N0=60_000.0,
     )
 
     for component in (src, comp, heater, turb, tot, load, shaft, snk):
         network.add_component(component)
+
+    # mechanical/signal wiring: comp and turb carry a real speed unknown
+    # (m0/m1); load is torque-only (no speed unknown), so it only gets a
+    # signal (power) connection, not a mechanical one.
+    network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
+    network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
+    network.connect(shaft, "p0", comp, "power", kind="signal")
+    network.connect(shaft, "p1", turb, "power", kind="signal")
+    network.connect(shaft, "p2", load, "power", kind="signal")
 
     # 3. thermal components
     comp_casing = ThermalMass(name="comp_casing", thermal_capacitance=2000.0, T0=T_AMBIENT)
@@ -183,15 +192,15 @@ def test_controller_to_pid_swap_keeps_the_operating_point():
     target_T = 430.0
     ctrl = Controller(
         name="ctrl", sensor=sensor, quantity="T [K]", component=comp,
-        free_param="N", value=target_T,
+        free_param="shaft", value=target_T,
     )
     network.add_component(ctrl)
     steady = network.solve(tol=1e-8, max_iter=400, damping=0.4, progress=False)
 
     pid = PIDController(
-        name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
+        name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft",
         setpoint=target_T, Kp=60.0, Ki=50.0, Kd=0.0,
-        output0=steady.params["comp.N"],
+        output0=steady.node_N["comp.shaft"],
         output_min=10_000.0, output_max=100_000.0,
     )
     network.replace_component(ctrl, pid)
@@ -223,7 +232,7 @@ def test_pid_feedforward_can_bias_from_the_commanded_load():
 
     pid = PIDController(
         name="gov", sensor=parts["tot"], quantity="T [K]", component=parts["comp"],
-        free_param="N", setpoint=500.0, Kp=1.0, Ki=0.0, Kd=0.0,
+        free_param="shaft", setpoint=500.0, Kp=1.0, Ki=0.0, Kd=0.0,
         output0=baseline_N, feedforward=fuel_for_load,
     )
 

@@ -12,7 +12,7 @@ from thermowave.components.shaft import Shaft  # noqa: E402
 from thermowave.components.sink import Sink  # noqa: E402
 from thermowave.components.source import Source  # noqa: E402
 from thermowave.components.turbine import Turbine  # noqa: E402
-from thermowave.core.network import Network, NetworkState  # noqa: E402
+from thermowave.core.network import Network  # noqa: E402
 from thermowave.core.plotting import ThermoPlot, plot_series  # noqa: E402
 from thermowave.fluids.ideal_gas import IdealGasFluid  # noqa: E402
 from thermowave.maps.characteristic_map import CharacteristicMap  # noqa: E402
@@ -27,7 +27,7 @@ def _build_turboshaft(N0: float, inertia: float = 0.05):
     heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-300000.0)
     turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
     shaft = Shaft(
-        name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
+        name="shaft", members=[comp, turb], signs=[-1.0, 1.0],
         efficiency=0.98, inertia=inertia, dynamic=True, N0=N0,
     )
     snk = Sink(name="snk")
@@ -39,6 +39,10 @@ def _build_turboshaft(N0: float, inertia: float = 0.05):
     network.connect(comp, "out", heater, "in")
     network.connect(heater, "out", turb, "in")
     network.connect(turb, "out", snk, "in")
+    network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
+    network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
+    network.connect(shaft, "p0", comp, "power", kind="signal")
+    network.connect(shaft, "p1", turb, "power", kind="signal")
     return network, comp, turb, shaft
 
 
@@ -54,13 +58,7 @@ def test_transient_result_plot_returns_axes_with_expected_data():
     assert list(lines[0].get_xdata()) == history.times
 
     expected_turb_power = [
-        turb.report_metrics(
-            NetworkState(
-                fluid=step.fluid, node_P=step.node_P, node_h=step.node_h,
-                node_mdot=step.node_mdot, params=step.params,
-            )
-        )["power [W]"]
-        for step in history.steps
+        turb.report_metrics(step.state())["power [W]"] for step in history.steps
     ]
     assert list(lines[1].get_ydata()) == pytest.approx(expected_turb_power)
 

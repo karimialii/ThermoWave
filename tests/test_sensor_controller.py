@@ -76,7 +76,7 @@ def test_controller_raises_if_free_param_not_declared_free():
             sensor=sensor,
             quantity="T [K]",
             component=comp,
-            free_param="N",
+            free_param="shaft",
             value=400.0,
         )
 
@@ -85,7 +85,7 @@ def test_controller_residual_is_measured_minus_target():
     comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=1.4, N=None)
     sensor = Sensor(name="s1")
     ctrl = Controller(
-        name="ctrl1", sensor=sensor, quantity="T [K]", component=comp, free_param="N", value=400.0
+        name="ctrl1", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft", value=400.0
     )
     air = AIR
     P, T = 300000.0, 450.0
@@ -98,7 +98,7 @@ def test_controller_ports_is_empty():
     comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=1.4, N=None)
     sensor = Sensor(name="s1")
     ctrl = Controller(
-        name="ctrl1", sensor=sensor, quantity="T [K]", component=comp, free_param="N", value=400.0
+        name="ctrl1", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft", value=400.0
     )
     assert ctrl.ports() == {}
 
@@ -118,7 +118,7 @@ def test_controller_drives_compressor_outlet_temperature_end_to_end():
         sensor=sensor,
         quantity="T [K]",
         component=comp,
-        free_param="N",
+        free_param="shaft",
         value=target_T,
     )
 
@@ -141,7 +141,7 @@ def test_controller_accepts_callable_value_evaluated_live():
     sensor_b = Sensor(name="sb")
     ctrl = Controller(
         name="ctrl1", sensor=sensor_a, quantity="T [K]",
-        component=comp, free_param="N",
+        component=comp, free_param="shaft",
         value=lambda s: sensor_b.report_metrics(s)["T [K]"],
     )
 
@@ -164,7 +164,7 @@ def test_controller_report_metrics_evaluates_callable_target():
     sensor_b = Sensor(name="sb")
     ctrl = Controller(
         name="ctrl1", sensor=sensor_a, quantity="T [K]",
-        component=comp, free_param="N",
+        component=comp, free_param="shaft",
         value=lambda s: sensor_b.report_metrics(s)["T [K]"],
     )
 

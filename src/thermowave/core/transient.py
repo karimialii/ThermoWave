@@ -242,6 +242,7 @@ def solve_transient(
             state = NetworkState(
                 fluid=result.fluid, node_P=result.node_P, node_h=result.node_h,
                 node_mdot=result.node_mdot, params=result.params, node_fluid=result.node_fluid,
+                node_N=result.node_N,
             )
             for pid in pid_like:
                 pid.step(state, h)

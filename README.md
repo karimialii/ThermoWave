@@ -198,19 +198,41 @@ component doesn't need it":
 | `differential_parameters() -> dict[str, initial]` | `{}` | this component owns a scalar quantity that evolves in time (e.g. `Shaft(dynamic=True)`'s rotor speed). Like `free_parameters()`, but closed automatically by the solver (see "Transient simulation" below) instead of needing a matching residual — don't add one yourself. |
 | `state_derivative(state) -> dict[str, rate]` | `{}` | required alongside `differential_parameters()`: `d(value)/dt` for each declared key, evaluated at the current state. |
 
-### Cross-component coupling (no new `Connection` kind needed)
+### Cross-component coupling: mechanical and signal ports
 
-Some components don't move fluid at all — they exist purely to tie other
-components' free parameters or metrics together. `Shaft`
-(`src/thermowave/components/shaft.py`) ties two or more components' shaft
-speeds together via residuals of the form `component[i].N - gear_ratio *
-component[0].N`; `Controller`/`Setpoint` tie a component's free parameter to
-a `Sensor` reading or the component's own metric. These have `ports() ->
-{}` (or ports with no flow significance) and no `fixed_node_*`; they exist
-in `network.components` purely to add unknowns/residuals or read other
-components' `report_metrics()`. This is the established pattern for anything
-that isn't a flow connection — reach for it before adding a new
-`Connection` kind.
+`Network.connect()` supports three kinds, all resolved through the same
+union-find as ordinary flow ports: `"flow"` (shares `P`/`h`/`mdot`),
+`"mechanical"` (shares a shaft speed `N`), and `"signal"` (shares a scalar
+one component computes and another reads, e.g. power). A component declares
+which of its ports are which via three separate namespaces —
+`ports()`, `mechanical_ports()`, `signal_ports()` — so a mechanical or
+signal port never accidentally participates in the flow-node graph.
+
+`Turbine`/`Compressor` expose a `"shaft"` mechanical port (`N` given
+directly fixes it; `N=None` leaves it free, closed the same way a free flow
+parameter is) and a `"power"` signal port (`provided_signal_values()`
+publishes `mdot*(h_in-h_out)`, so a reader never has to hold an object
+reference to compute it). `Shaft` (`src/thermowave/components/shaft.py`)
+ties members' shaft speeds together through its own mechanical ports
+(`"m0"`, `"m1"`, ...), one per speed-tied member, plus one signal port
+(`"p0"`, `"p1"`, ...) per member for the power balance — wired explicitly:
+
+```python
+network.connect(shaft, "m0", turbine, "shaft", kind="mechanical")
+network.connect(shaft, "p0", turbine, "power", kind="signal")
+```
+
+`Generator`/`ElectricMotor`/`SimpleGenerator` follow the same pattern —
+a `"shaft"` mechanical port for speed and a `"power"` signal port for the
+electrical/mechanical power reading, both connect()-wired rather than held
+as object references. `Controller`/`Setpoint`/`PIDController` still tie a
+component's free parameter (ordinary or mechanical) to a `Sensor` reading
+or the component's own metric — `free_param` may now name either kind
+(e.g. `free_param="shaft"` targets a mechanical port).
+
+Anything that contributes no flow, mechanical, or signal port (like
+`Controller`/`Setpoint` themselves) still has `ports() -> {}` and exists in
+`network.components` purely to add unknowns/residuals.
 
 ### A minimal example
 
@@ -577,14 +599,15 @@ outlet state, e.g. saturated vapor / a quality / N degrees of superheat, then
   a spec outlet, or a given duty), the SimpleCombustor-style model that
   doesn't model the heat source/sink explicitly. 3 residuals.
 - **`Evaporator` / `Condenser`** — two-stream, coupling the phase-change side
-  to an explicit heat-source / coolant stream (SimpleHeatExchanger-style, 4
+  to an explicit heat-source / coolant stream (`HeatExchanger`-style, 4
   ports / 6 residuals). Both streams share the network's single fluid model
-  (same limitation as `SimpleHeatExchanger`), so these model a same-fluid
+  (same limitation as `HeatExchanger`), so these model a same-fluid
   coupling. The stream-to-stream pinch is a **reported diagnostic, not a
   solved constraint**: a negative reported `pinch [K]` flags an infeasible
   outlet spec (the source would have to end up colder than the boiling fluid)
   rather than being silently corrected — the user owns feasibility, the way
-  `SimpleHeatExchanger` trusts a user-supplied effectiveness.
+  `HeatExchanger`'s fixed-effectiveness mode trusts a user-supplied
+  effectiveness.
 - **`Drum`** — a steam drum: the two-phase, multi-port analogue of `Tank`
   (differential `(P, h)` on a saturated inventory via the identical
   finite-difference 2×2 mass/energy ODE, generalized to feed/riser inlets and
@@ -613,6 +636,46 @@ section above).
 
 ## Roadmap
 
+- **Mechanical and signal connection kinds — landed.**
+  `network.connect()` now supports `kind="mechanical"` (shares a shaft
+  speed `N`) and `kind="signal"` (shares a scalar one component computes
+  and another reads, e.g. power) alongside `kind="flow"`, resolved through
+  the same union-find (`src/thermowave/core/network.py`,
+  `_SUPPORTED_CONNECTION_KINDS`; `src/thermowave/core/solver.py` adds a
+  real `node_N` Newton-unknown block plus a resolved `node_signal` pass).
+  `Turbine`/`Compressor` expose a `"shaft"` mechanical port and a `"power"`
+  signal port; `Shaft` couples members through its own per-member `"m0"`/
+  `"m1"`/... mechanical ports and `"p0"`/`"p1"`/... signal ports instead of
+  an implicit `components=[...]` list; `Generator`/`ElectricMotor`/
+  `SimpleGenerator` read speed/power through `connect()`-wired ports
+  instead of holding a direct object reference. `Setpoint`/`Controller`/
+  `PIDController` accept a mechanical port name (e.g. `free_param="shaft"`)
+  anywhere they used to accept only an ordinary free parameter. This is a
+  breaking change to `Shaft`'s constructor (`components=` is now
+  `members=`, and every mechanical/power coupling needs an explicit
+  `connect(..., kind=...)` call) and to `Generator`/`ElectricMotor`/
+  `SimpleGenerator` (the `component=` constructor arg is gone) — see
+  [the gas-turbine guide](docs/tutorials/building-a-gas-turbine-model.md)
+  for the updated wiring pattern.
+- **`SimpleHeatExchanger` repurposed to single-stream, and a merged
+  `HeatExchanger` — landed.** `SimpleHeatExchanger` is now a 2-port
+  (`in`/`out`) single-fluid-stream component driven by a signed duty `Q`
+  [W] (positive heats, negative cools) instead of the old fixed-
+  effectiveness dual-fluid model. The dual-fluid model moved to a new
+  `HeatExchanger` (`src/thermowave/components/heat_exchanger.py`), which
+  auto-selects between fixed-effectiveness mode (give `effectiveness=`) and
+  UA/NTU/arrangement mode (give `UA=`) — `MultiPassHeatExchanger` is now a
+  thin, always-UA-mode subclass of it with its constructor unchanged, so
+  existing `MultiPassHeatExchanger(...)` call sites keep working as-is.
+- **A real fuel port on `Combustor` — landed.**
+  `Combustor(use_fuel_port=True)` adds a genuine `"fuel_in"` port (mirroring
+  `SimpleCombustor`'s existing flag) — `mdot_fuel` is then read from that
+  port's own solved mass flow rather than being a component-owned free
+  parameter, and if the connected fuel stream's fluid is itself
+  Cantera-flavored (exposes `mass_fractions()`/`mechanism`), its actual
+  composition and its own `(P, h)` are used in the equilibrium calculation
+  instead of the `fuel=` string evaluated at the air inlet's state.
+  `use_fuel_port=False` (the default) is unchanged.
 - **A clean end-to-end build workflow — landed.** Assembling a gas turbine used
   to need a dozen raw attribute assignments with hand-picked signs, and there
   was no way to change a network once solved. Now:
@@ -712,21 +775,12 @@ Where I'm taking this next, in roughly the order I plan to tackle it:
   `arrangement="custom"` plus `correlation=Callable[[NTU, Cr], float]` plugs
   in a user-supplied effectiveness correlation (plate-fin/finned-tube/
   vendor-supplied) alongside the four built-in presets
-  (`src/thermowave/components/multi_pass_heat_exchanger.py`,
+  (`src/thermowave/components/heat_exchanger.py`,
   `_ARRANGEMENTS`), without needing a new named preset. It chains
   `n_passes` the same same-direction way `"parallel"`/`"crossflow"` do (no
   arrangement-specific directionality is assumed for an arbitrary
   correlation); `correlation` is required when `arrangement="custom"` and
   rejected otherwise.
-- **A first-class connection kind beyond `kind="flow"`**
-  (`src/thermowave/core/network.py`, `_SUPPORTED_CONNECTION_KINDS`).
-  Mechanical coupling (`Shaft`) and heat coupling (`Convection`/
-  `Conduction`/`Radiation`) each work today, but only as their own bespoke
-  component — not as `network.connect(a, "shaft_out", b, "shaft_in",
-  kind="mechanical")`. I want one uniform connection API across
-  flow/mechanical/heat/electrical domains, so a new coupling type can plug
-  into the existing graph-traversal and reporting machinery instead of
-  needing its own component class.
 - **Variable-geometry turbomachinery maps — landed.**
   `CharacteristicMap` (`src/thermowave/maps/characteristic_map.py`) now
   parses every `"Angle"` block in a section, not just the first, and

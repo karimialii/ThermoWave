@@ -74,16 +74,7 @@ def _metrics_for(result: "SolveResult", component: "BaseComponent") -> dict[str,
     steps/components; a cache would only pay off well past the sizes this
     solver targets.
     """
-    from thermowave.core.network import NetworkState
-
-    state = NetworkState(
-        fluid=result.fluid,
-        node_P=result.node_P,
-        node_h=result.node_h,
-        node_mdot=result.node_mdot,
-        params=result.params,
-        node_fluid=result.node_fluid,
-    )
+    state = result.state()
     metrics = component.report_metrics(state)
     if metrics is None:
         raise ValueError(

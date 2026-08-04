@@ -50,6 +50,27 @@ class BaseComponent(ABC):
         """Node names this component creates internally (not shared with neighbors)."""
         return []
 
+    def mechanical_ports(self) -> dict[str, str]:
+        """Named mechanical (shaft-speed) ports -> this component's own port
+        id -- the mechanical counterpart of ports(), kept as its own
+        namespace rather than folded into ports() so that a mechanical port
+        never accidentally participates in the flow-node graph (Network.
+        _all_nodes()/_port_nodes() and the solver's (P, h, mdot) unknown
+        discovery all read ports() only). Network.connect(..., kind=
+        "mechanical") resolves from/to port names through this dict instead.
+        Default: no mechanical ports.
+        """
+        return {}
+
+    def signal_ports(self) -> dict[str, str]:
+        """Named signal ports -> this component's own port id -- the signal
+        counterpart of ports()/mechanical_ports(), for a scalar one
+        component computes (see provided_signal_values()) and another reads.
+        Network.connect(..., kind="signal") resolves from/to port names
+        through this dict. Default: no signal ports.
+        """
+        return {}
+
     @abstractmethod
     def residuals(self, state: "NetworkState") -> list[float]:
         """Residual equations contributed by this component given current state."""
@@ -159,7 +180,7 @@ class BaseComponent(ABC):
         this component actually has ports named that (most do); otherwise
         none, so it's silently skipped rather than erroring. Override for a
         component with differently-named or multiple flow-through port pairs
-        (e.g. SimpleHeatExchanger's hot_in/hot_out and cold_in/cold_out) so
+        (e.g. HeatExchanger's hot_in/hot_out and cold_in/cold_out) so
         its guess actually gets used for each of them, instead of leaving
         those downstream nodes to fall back to the solver's flat default
         guess — which, left unfixed for long enough (e.g. a map-based
@@ -204,7 +225,7 @@ class BaseComponent(ABC):
         identifies which one is currently being propagated. Default:
         delegate to guess_outlet() (fine for the common single-pair case;
         override this instead when different pairs need different
-        treatment, as SimpleHeatExchanger's hot/cold sides do).
+        treatment, as HeatExchanger's hot/cold sides do).
         """
         return self.guess_outlet(P_in, h_in, mdot)
 
@@ -293,6 +314,82 @@ class BaseComponent(ABC):
         residuals() would otherwise have to recompute a second time.
         """
         return None
+
+    def fixed_mechanical_values(self) -> dict[str, float]:
+        """this_component_port_id -> shaft speed N [rev/min] this component
+        fixes as a boundary condition on that mechanical port (e.g. a
+        Turbine/Compressor constructed with a literal N instead of N=None).
+        Keyed by this component's own raw port id, exactly like
+        fixed_node_values() is for flow ports -- Network canonicalizes it
+        through the same connect()/union-find machinery, so two mechanical
+        ports wired together with kind="mechanical" share one speed value.
+        Default: no mechanical ports fixed.
+        """
+        return {}
+
+    def free_mechanical_ports(self) -> dict[str, float]:
+        """this_component_port_id -> initial guess [rev/min] for a
+        mechanical port this component leaves unfixed (e.g. Turbine/
+        Compressor with N=None) -- the mechanical analogue of
+        free_parameters(), but keyed by this component's own raw port id (a
+        *node*, since connect() may merge several components' ports into one
+        shared speed unknown) rather than by component name. The solver adds
+        one Newton unknown per canonical node with at least one entry here
+        and none in fixed_mechanical_values(), read back via
+        state.N(<this component's own raw port id>) inside residuals().
+        When several components share a mechanical node, the first
+        registered guess wins (see Network.solve()). Default: no free
+        mechanical ports.
+        """
+        return {}
+
+    def guess_free_mechanical_ports(
+        self, fluid: "BaseFluid", P_in: float, h_in: float, mdot: float
+    ) -> dict[str, float]:
+        """Like free_mechanical_ports(), but allowed to use the solver's
+        warm-start guess of this component's own inlet state -- the
+        mechanical-port counterpart of guess_free_parameters(). Must return
+        the same keys as free_mechanical_ports(); default ignores the
+        context and falls back to it.
+        """
+        return self.free_mechanical_ports()
+
+    def provided_signal_values(self, state: "NetworkState") -> dict[str, float]:
+        """this_component_port_id -> a scalar value (e.g. shaft power [W])
+        this component computes at a signal port, given the already-resolved
+        rest of `state` (P/h/mdot/N) -- the mechanism that lets e.g. a
+        Turbine publish its own computed power for a Generator/Shaft to read
+        via state.signal(<its own port id>) once wired together with
+        kind="signal", instead of the reader holding a direct object
+        reference to the producer.
+
+        Resolved once per residual evaluation, in one pass over every
+        component (see Network._resolve_node_signal()) -- unlike
+        outlet_fluid()/merge_fluids(), this is not a fixed-point loop, since
+        every value here is expected to depend only on this component's own
+        already-known port state, never on another component's provided
+        signal. A signal port with no provider anywhere in the network is
+        simply absent from state.node_signal; reading it raises KeyError,
+        the same way reading an unconnected/unresolved node does elsewhere.
+        Default: no signals provided.
+        """
+        return {}
+
+    def closes_mechanical_nodes(self) -> list[str]:
+        """Canonical mechanical node ids (see Network._canonical()) this
+        component supplies a closing residual for -- the mechanical
+        counterpart of closes_parameters(), used only by
+        Network.check_wiring() to name an unclosed shaft-speed unknown
+        instead of only reporting that the totals don't add up.
+
+        Needs network access (to canonicalize this component's own raw port
+        ids) that closes_parameters() doesn't, so it's a separate hook rather
+        than folded into that one -- self._network is set once this
+        component has been added to a Network (see
+        Network.add_component()). Purely diagnostic; the solver itself never
+        reads this. Default: none.
+        """
+        return []
 
     def report_metrics(self, state: "NetworkState") -> dict[str, float] | None:
         """Performance metrics (power, efficiency, pressure ratio, ...) for the

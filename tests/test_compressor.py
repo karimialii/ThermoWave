@@ -20,11 +20,14 @@ class _FakeHeatPath:
 class _FakeState:
     """Minimal stand-in for core.network.NetworkState."""
 
-    def __init__(self, fluid, mdot, node_values: dict[str, tuple[float, float]], params=None):
+    def __init__(
+        self, fluid, mdot, node_values: dict[str, tuple[float, float]], params=None, node_N=None
+    ):
         self.fluid = fluid
         self._mdot = mdot
         self._node_values = node_values
         self._params = params or {}
+        self._node_N = node_N or {}
 
     def node(self, name: str) -> tuple[float, float]:
         return self._node_values[name]
@@ -37,6 +40,9 @@ class _FakeState:
 
     def param(self, name: str) -> float:
         return self._params[name]
+
+    def N(self, name: str) -> float:
+        return self._node_N[name]
 
 
 def test_compressor_ports_returns_inlet_and_outlet_derived_from_name():
@@ -169,9 +175,10 @@ def test_compressor_free_parameters_empty_when_n_given():
 
 def test_compressor_free_parameters_includes_n_when_n_omitted():
     comp = Compressor(name="c1", map_path=_MAP_PATH, gamma=1.4)
-    params = comp.free_parameters()
-    assert set(params.keys()) == {"N"}
-    assert params["N"] > 0
+    mech = comp.free_mechanical_ports()
+    assert set(mech.keys()) == {"c1.shaft"}
+    assert mech["c1.shaft"] > 0
+    assert comp.fixed_mechanical_values() == {}
 
 
 def test_compressor_residuals_uses_n_from_state_param_when_n_omitted():
@@ -197,7 +204,7 @@ def test_compressor_residuals_uses_n_from_state_param_when_n_omitted():
             "c1.in": (P_in, h_in),
             "c1.out": (PR * P_in, h_out_guess),
         },
-        params={"c1.N": N},
+        node_N={"c1.shaft": N},
     )
     momentum_residual, energy_residual, mass_residual = comp.residuals(state)
     assert math.isclose(momentum_residual, 0.0, abs_tol=1e-6)

@@ -12,10 +12,13 @@ if TYPE_CHECKING:
     from thermowave.core.transient import TransientResult
     from thermowave.fluids.base_fluid import BaseFluid
 
-# Connection kinds this Network can wire today. Mechanical (shared shaft/speed),
-# signal (controller setpoints), and heat-transfer connections are planned but
-# not yet implemented — connect() raises NotImplementedError for those kinds.
-_SUPPORTED_CONNECTION_KINDS = {"flow"}
+# Connection kinds this Network can wire. "flow" merges two ports into one
+# shared (P, h, mdot) node; "mechanical" merges two ports into one shared
+# shaft-speed (N) node; "signal" merges two ports into one shared scalar
+# (e.g. shaft power) resolved from whichever connected component computes
+# it. Heat-transfer connections use their own mechanism (see
+# Network.add_heat_path()) rather than this list.
+_SUPPORTED_CONNECTION_KINDS = {"flow", "mechanical", "signal"}
 
 # A plain float (a fixed design target), or a callable NetworkState -> float
 # re-evaluated fresh every residual call, for tying a target to something
@@ -39,12 +42,26 @@ class NetworkState:
         node_mdot: dict[str, float],
         params: dict[str, float] | None = None,
         node_fluid: dict[str, "BaseFluid"] | None = None,
+        node_N: dict[str, float] | None = None,
+        node_signal: dict[str, float] | None = None,
     ):
         self.fluid = fluid
         self.node_P = node_P
         self.node_h = node_h
         self.node_mdot = node_mdot
         self.params = params if params is not None else {}
+        # Shaft speed [rev/min] at every mechanical port this network has
+        # (raw component-local port id -> value, already expanded from the
+        # canonical/shared value the same way node_P/node_h are) -- see
+        # BaseComponent.fixed_mechanical_values()/free_mechanical_ports() and
+        # Network._all_mechanical_nodes(). Empty for a network with no
+        # mechanical ports at all (the common case today).
+        self.node_N = node_N if node_N is not None else {}
+        # Scalar signal values (e.g. shaft power [W]) at every signal port
+        # some component provides -- raw port id -> value, resolved once per
+        # residual evaluation by Network._resolve_node_signal(). Empty for a
+        # network with no signal ports.
+        self.node_signal = node_signal if node_signal is not None else {}
         # node -> BaseFluid, populated by Network._resolve_node_fluid() for
         # any node downstream of a component whose outlet_fluid() changes
         # composition (e.g. Combustor) -- nodes not present here (the
@@ -73,6 +90,22 @@ class NetworkState:
     def param(self, name: str) -> float:
         return self.params[name]
 
+    def N(self, name: str) -> float:
+        """Shaft speed [rev/min] at this component's own raw mechanical port
+        id `name` -- shares a value with every other port connected to it
+        via kind="mechanical", the same way node()/mdot() do for flow ports.
+        """
+        return self.node_N[name]
+
+    def signal(self, name: str) -> float:
+        """Scalar value (e.g. power [W]) at this component's own raw signal
+        port id `name`, as computed by whichever connected component
+        provides it (see BaseComponent.provided_signal_values()). Raises
+        KeyError if nothing in the network provides a value for this port's
+        canonical node.
+        """
+        return self.node_signal[name]
+
     def fluid_at(self, name: str) -> "BaseFluid":
         """BaseFluid that's actually flowing through node `name` -- the
         network's own default `fluid` unless a component upstream of this
@@ -89,10 +122,18 @@ class NetworkState:
 class Connection:
     """A typed link between one component's port and another's.
 
-    Only kind="flow" is implemented: it merges the two ports into a single
-    shared (P, h) node, i.e. the two components are physically joined by a
-    stream. Future kinds (mechanical, signal, heat) will couple components
-    through their own residuals instead of merging node state.
+    All three kinds merge the two ports into one shared node via the same
+    union-find (Network._union()); what differs is which NetworkState
+    channel that shared node lives in:
+      - "flow": (P, h, mdot) -- the two components are physically joined by
+        a stream.
+      - "mechanical": N (shaft speed) -- the two components turn together.
+      - "signal": a scalar (e.g. shaft power) one connected component
+        computes and the other reads (see BaseComponent.
+        provided_signal_values()).
+    Heat-transfer connections use their own mechanism instead
+    (Network.add_heat_path()), since a heat path couples its endpoints
+    through their own residuals rather than by merging node state.
     """
 
     def __init__(
@@ -224,6 +265,12 @@ class Network:
 
     def _register_nodes(self, component: "BaseComponent") -> None:
         for port_id in component.ports().values():
+            self._parent.setdefault(port_id, port_id)
+            self.graph.add_node(port_id)
+        for port_id in component.mechanical_ports().values():
+            self._parent.setdefault(port_id, port_id)
+            self.graph.add_node(port_id)
+        for port_id in component.signal_ports().values():
             self._parent.setdefault(port_id, port_id)
             self.graph.add_node(port_id)
         for node_name in component.internal_nodes():
@@ -419,8 +466,12 @@ class Network:
         for component in self.components:
             self._register_nodes(component)
         for connection in self.connections:
-            from_id = self._resolve_port(connection.from_component, connection.from_port)
-            to_id = self._resolve_port(connection.to_component, connection.to_port)
+            from_id = self._resolve_port(
+                connection.from_component, connection.from_port, connection.kind
+            )
+            to_id = self._resolve_port(
+                connection.to_component, connection.to_port, connection.kind
+            )
             self._union(from_id, to_id)
             self.graph.add_edge(from_id, to_id, kind=connection.kind)
 
@@ -437,8 +488,8 @@ class Network:
                 f"Connection kind {kind!r} is not yet supported "
                 f"(supported: {sorted(_SUPPORTED_CONNECTION_KINDS)})"
             )
-        from_id = self._resolve_port(from_component, from_port)
-        to_id = self._resolve_port(to_component, to_port)
+        from_id = self._resolve_port(from_component, from_port, kind)
+        to_id = self._resolve_port(to_component, to_port, kind)
 
         self._union(from_id, to_id)
         self.graph.add_edge(from_id, to_id, kind=kind)
@@ -447,12 +498,22 @@ class Network:
         self.connections.append(connection)
         return connection
 
-    def _resolve_port(self, component: "BaseComponent", port_name: str) -> str:
-        ports = component.ports()
+    def _ports_for_kind(self, component: "BaseComponent", kind: str) -> dict[str, str]:
+        if kind == "mechanical":
+            return component.mechanical_ports()
+        if kind == "signal":
+            return component.signal_ports()
+        return component.ports()
+
+    def _resolve_port(
+        self, component: "BaseComponent", port_name: str, kind: str = "flow"
+    ) -> str:
+        ports = self._ports_for_kind(component, kind)
+        kind_label = "" if kind == "flow" else f"{kind} "
         if port_name not in ports:
             raise NetworkTopologyError(
-                f"Component {component.name!r} has no port {port_name!r}; "
-                f"available ports: {sorted(ports)}"
+                f"Component {component.name!r} has no {kind_label}port {port_name!r}; "
+                f"available {kind_label}ports: {sorted(ports)}"
             )
         return ports[port_name]
 
@@ -532,6 +593,64 @@ class Network:
             for port_id, value in component.guess_node_mdot().items():
                 guesses[self._canonical(port_id)] = value
         return guesses
+
+    def _fixed_mechanical_values(self) -> dict[str, float]:
+        fixed: dict[str, float] = {}
+        for component in self.components:
+            for port_id, value in component.fixed_mechanical_values().items():
+                fixed[self._canonical(port_id)] = value
+        return fixed
+
+    def _guess_mechanical_ports(self) -> dict[str, float]:
+        guesses: dict[str, float] = {}
+        for component in self.components:
+            for port_id, value in component.free_mechanical_ports().items():
+                canon = self._canonical(port_id)
+                guesses.setdefault(canon, value)
+        return guesses
+
+    def _all_mechanical_nodes(self) -> list[str]:
+        """Every canonical mechanical (shaft-speed) node -- the union of
+        every component's fixed_mechanical_values() and
+        free_mechanical_ports() keys, canonicalized. A port only becomes a
+        mechanical node by appearing in one of those two hooks; there is no
+        separate "this port is mechanical" declaration, mirroring how flow
+        ports never need one either.
+        """
+        nodes: list[str] = []
+        for canon in {**self._guess_mechanical_ports(), **self._fixed_mechanical_values()}:
+            if canon not in nodes:
+                nodes.append(canon)
+        return nodes
+
+    def _free_mechanical_nodes(self) -> list[str]:
+        fixed = self._fixed_mechanical_values()
+        return [n for n in self._all_mechanical_nodes() if n not in fixed]
+
+    def _resolve_node_signal(self, state: "NetworkState") -> dict[str, float]:
+        """raw_port_id -> value for every signal port some component
+        provides, given the rest of `state` (P/h/mdot/N) already resolved --
+        a single pass over every component's provided_signal_values(), not a
+        fixed-point loop (unlike _resolve_node_fluid()), since a signal
+        value is expected to depend only on its own component's already-
+        known port state, never on another component's provided signal.
+        Every raw port id sharing a canonical node with a provided value
+        gets that same value, the same expansion node_P/node_h/node_mdot get
+        in Solver.solve()'s unpack().
+        """
+        canon_signal: dict[str, float] = {}
+        for component in self.components:
+            for port_id, value in component.provided_signal_values(state).items():
+                canon_signal[self._canonical(port_id)] = value
+        if not canon_signal:
+            return {}
+        node_signal: dict[str, float] = {}
+        for component in self.components:
+            for port_id in component.signal_ports().values():
+                canon = self._canonical(port_id)
+                if canon in canon_signal:
+                    node_signal[port_id] = canon_signal[canon]
+        return node_signal
 
     def _resolve_node_fluid(self, state: "NetworkState") -> dict[str, "BaseFluid"]:
         """node -> BaseFluid, forward-propagated from every fixed boundary
@@ -747,6 +866,28 @@ class Network:
                     f"but one must be removed (see Network.remove_component/"
                     f"replace_component, e.g. swapping a steady-state Controller for a "
                     f"transient PIDController)."
+                )
+
+        free_mech_nodes = set(self._free_mechanical_nodes())
+        mech_closed_by: dict[str, list[str]] = {n: [] for n in free_mech_nodes}
+        for component in self.components:
+            for canon in component.closes_mechanical_nodes():
+                mech_closed_by.setdefault(canon, []).append(component.name)
+
+        for canon, holders in sorted(mech_closed_by.items()):
+            if canon not in free_mech_nodes:
+                continue
+            if not holders:
+                problems.append(
+                    f"mechanical node {canon} is free (no component fixes its N) but "
+                    f"nothing closes it — add a Setpoint/Controller/PIDController "
+                    f"targeting it, tie it to a Shaft, or fix N on one of its members "
+                    f"instead of leaving it None."
+                )
+            elif len(holders) > 1:
+                problems.append(
+                    f"mechanical node {canon} is closed by {len(holders)} components "
+                    f"({', '.join(sorted(holders))}) but is only one unknown."
                 )
 
         return problems

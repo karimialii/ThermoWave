@@ -39,9 +39,14 @@ class Controller(BaseComponent):
     See Setpoint's docstring for the fuller rationale — both classes share
     this behavior via the same TargetValue type.
 
+    free_param may also name a mechanical port left free (e.g. a Turbine/
+    Compressor with N=None exposes "shaft") instead of an ordinary free
+    parameter -- see Setpoint's docstring for the same widening.
+
     Raises ValueError at construction if the target component doesn't
-    currently declare free_param as free, for the same reason as Setpoint:
-    failing fast here beats a mismatched Newton system discovered later.
+    currently declare free_param as free (in either sense), for the same
+    reason as Setpoint: failing fast here beats a mismatched Newton system
+    discovered later.
     """
 
     def __init__(
@@ -53,11 +58,16 @@ class Controller(BaseComponent):
         free_param: str,
         value: TargetValue,
     ):
-        if free_param not in component.free_parameters():
+        mech_ports = component.mechanical_ports()
+        self._mechanical = (
+            free_param in mech_ports and mech_ports[free_param] in component.free_mechanical_ports()
+        )
+        if not self._mechanical and free_param not in component.free_parameters():
             raise ValueError(
                 f"Controller {name!r} actuates {component.name!r}.{free_param}, but "
-                f"that component doesn't currently declare {free_param!r} as free — "
-                f"pass None for it at construction so it becomes a solvable unknown."
+                f"that component doesn't currently declare {free_param!r} as a free "
+                f"parameter or a free mechanical port — pass None for it at "
+                f"construction so it becomes a solvable unknown."
             )
 
         self.name = name
@@ -74,7 +84,16 @@ class Controller(BaseComponent):
         return {}
 
     def closes_parameters(self) -> list[str]:
+        if self._mechanical:
+            return []
         return [f"{self.component.name}.{self.free_param}"]
+
+    def closes_mechanical_nodes(self) -> list[str]:
+        network = getattr(self, "_network", None)
+        if not self._mechanical or network is None:
+            return []
+        port_id = self.component.mechanical_ports()[self.free_param]
+        return [network._canonical(port_id)]
 
     def report_category(self) -> str:
         return "controller"

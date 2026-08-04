@@ -38,6 +38,7 @@ result.print_report()
 | **[Components](components/index.md)** | Every component's ports, governing equations, and free parameters, with a labeled diagram for each. |
 | **[Benchmarks](benchmark/index.md)** | Full network models checked against real published plant/rig data, not synthetic test cases. |
 | **[API reference](api.md)** | Auto-generated reference for every public class and function. |
+| **[Changelog](changelog.md)** | What changed release to release, including migration notes for breaking changes. |
 
 ## Why ThermoWave
 
@@ -84,4 +85,5 @@ examples/index
 components/index
 benchmark/index
 api
+changelog
 ```

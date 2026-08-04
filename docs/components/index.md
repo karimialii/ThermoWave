@@ -24,7 +24,7 @@ control/index
 | [Turbomachinery](turbomachinery/index.md) | `SimpleCompressor`, `Compressor`, `SimpleTurbine`, `Turbine`, `SteamTurbine`, `Pump` |
 | [Mechanical & electrical](mechanical/index.md) | `Shaft`, `ShaftLoad`, `ElectricMotor`, `Generator`, `SimpleGenerator` |
 | [Combustion](combustion/index.md) | `SimpleCombustor`, `Combustor` |
-| [Heat exchangers & phase change](heat-exchangers/index.md) | `SimpleHeatExchanger`, `MultiPassHeatExchanger`, `Condenser`, `SimpleCondenser`, `Evaporator`, `SimpleEvaporator`, `Drum`, `Tank` |
+| [Heat exchangers & phase change](heat-exchangers/index.md) | `SimpleHeatExchanger`, `HeatExchanger`, `MultiPassHeatExchanger`, `Condenser`, `SimpleCondenser`, `Evaporator`, `SimpleEvaporator`, `Drum`, `Tank` |
 | [Thermal network](thermal-network/index.md) | `ThermalMass`, `Convection`, `Conduction`, `Radiation` |
 | [Control & instrumentation](control/index.md) | `Sensor`, `Controller`, `PIDController`, `Setpoint`, `Schedule` |
 
@@ -116,6 +116,14 @@ instrumentation](control/index.md):
 - **`Shaft`** closes the speed-tie residuals between two or more
   turbomachines sharing a physical shaft.
 
+A free parameter can also be a *mechanical* port (e.g. `Turbine`/
+`Compressor`'s `"shaft"`, left free by `N=None`) instead of an ordinary one
+— `Setpoint`/`Controller`/`PIDController`'s `free_param` accepts either kind
+by name, and `Shaft`/other machines close it the same way, just through
+`network.connect(..., kind="mechanical")` instead of an implicit shared
+attribute. See [Mechanical & electrical](mechanical/index.md) for the full
+mechanical/signal port mechanism.
+
 ### Differential parameters: state that evolves in time
 
 A handful of components own genuine time-domain state instead of leaning on
@@ -171,8 +179,9 @@ convention:
   `hot_in`/`cold_out`), the shared `(P, h, mdot)` nodes `connect()` merges.
 - **Dashed red arrows** — a `heat_path` (`Convection`/`Conduction`/
   `Radiation`), an optional coupling to the [thermal network](thermal-network/index.md).
-- **Blue stub with a dot** — a mechanical shaft connection (`N`), tied to
-  other machines via [`Shaft`](mechanical/shaft.md).
+- **Blue stub with a dot** — a mechanical (`kind="mechanical"`, shaft speed
+  `N`) or signal (`kind="signal"`, e.g. power) port, tied to other machines
+  via `network.connect(..., kind=...)` — see [`Shaft`](mechanical/shaft.md).
 - **Dashed rounded badge** — a free parameter (`N`, `mdot_fuel`, ...) left
   `None` at construction, waiting for a `Setpoint`/`Controller`/`Shaft`
   elsewhere in the network to pin it down.

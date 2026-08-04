@@ -191,13 +191,14 @@ single-point calibration choice for a fluid with wildly
 temperature-dependent cp), while `MultiPassHeatExchanger`'s own forward
 model evaluates cp at each side's **inlet** temperature (see its
 docstring: *"cp evaluated at each side's own inlet state"*) — the same
-convention `SimpleHeatExchanger` uses. For CO2 with a large temperature
+convention `HeatExchanger`'s fixed-effectiveness mode uses. For CO2 with a large temperature
 swing across `rec1`'s cold side (123 °C to 264 °C, spanning a region
 where cp itself varies severalfold), those two evaluation conventions
 give measurably different `Cmin`/`Cr`, and therefore a different
 sensitivity of the cold-outlet temperature to the mass-flow split — so
 the *same* UA reproduces the exact duty at the calibration split, but the
 Newton solve (searching for whatever split makes T11=T12 under the
+
 network's own, inlet-cp-based model) lands somewhere else. Resolving it
 would mean either calibrating UA against `MultiPassHeatExchanger`'s own
 inlet-cp convention directly, or iterating the derivation at the solved

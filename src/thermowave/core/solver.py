@@ -435,6 +435,8 @@ class SolveResult:
         node_order: list[str],
         components: list["BaseComponent"],
         node_fluid: dict[str, "BaseFluid"] | None = None,
+        node_N: dict[str, float] | None = None,
+        network: "Network | None" = None,
     ):
         self.converged = converged
         self.iterations = iterations
@@ -451,6 +453,13 @@ class SolveResult:
         # composition-changing component, in which case every node just
         # falls back to `fluid` via NetworkState.fluid_at().
         self.node_fluid = node_fluid if node_fluid is not None else {}
+        # Shaft speed [rev/min] at every mechanical port -- empty for any
+        # network with no mechanical ports at all.
+        self.node_N = node_N if node_N is not None else {}
+        # Kept only so state() can re-resolve node_signal (a signal port's
+        # value is computed from the rest of state, not stored as its own
+        # array like node_P/node_h are, so it isn't captured anywhere else).
+        self._network = network
 
     def state(self) -> "NetworkState":
         """This result as a NetworkState, for calling a component's own
@@ -464,14 +473,18 @@ class SolveResult:
         """
         from thermowave.core.network import NetworkState
 
-        return NetworkState(
+        state = NetworkState(
             fluid=self.fluid,
             node_P=self.node_P,
             node_h=self.node_h,
             node_mdot=self.node_mdot,
             params=self.params,
             node_fluid=self.node_fluid,
+            node_N=self.node_N,
         )
+        if self._network is not None:
+            state.node_signal = self._network._resolve_node_signal(state)
+        return state
 
     def print_report(self) -> None:
         """Print a nicely formatted summary + per-node (P, T, h) table."""
@@ -483,6 +496,7 @@ class Solver:
 
     P_MIN = 1.0e3  # Pa, physical clamp floor to protect fluid property calls
     MDOT_MIN = 1.0e-6  # kg/s, physical clamp floor — mass flow cannot reverse
+    N_MIN = 1.0  # rev/min, physical clamp floor — shaft speed cannot reverse
 
     # step_limit()'s per-iteration bounds — named here (rather than as bare
     # literals in the two nearly-identical blocks that use them) so the two
@@ -501,6 +515,7 @@ class Solver:
     # atmospheric pressure and a modest reference enthalpy.
     DEFAULT_P_FALLBACK = 1.0e5  # Pa
     DEFAULT_H_FALLBACK = 3.0e5  # J/kg
+    DEFAULT_N_FALLBACK = 1.0e4  # rev/min
 
     def __init__(self, network: "Network"):
         self.network = network
@@ -565,6 +580,9 @@ class Solver:
         port_nodes = network._port_nodes()
         free_nodes = [n for n in all_nodes if n not in fixed_nodes]
         mdot_free_nodes = [n for n in port_nodes if n not in fixed_mdot]
+
+        fixed_mech = network._fixed_mechanical_values()
+        mech_free_nodes = network._free_mechanical_nodes()
         # free_params/param_names are computed further down, after the
         # warm-start (P, h) propagation below — components use that
         # propagated inlet guess (via guess_free_parameters()) rather than a
@@ -582,6 +600,10 @@ class Solver:
         raw_to_canonical: dict[str, str] = {}
         for component in network.components:
             for port_id in component.ports().values():
+                raw_to_canonical[port_id] = network._canonical(port_id)
+            for port_id in component.mechanical_ports().values():
+                raw_to_canonical[port_id] = network._canonical(port_id)
+            for port_id in component.signal_ports().values():
                 raw_to_canonical[port_id] = network._canonical(port_id)
             for node_name in component.internal_nodes():
                 raw_to_canonical[node_name] = node_name
@@ -612,10 +634,13 @@ class Solver:
 
         n_pressure = len(free_nodes)
         n_mdot = len(mdot_free_nodes)
+        n_mech = len(mech_free_nodes)
 
         def unpack(
             x: np.ndarray,
-        ) -> tuple[dict[str, float], dict[str, float], dict[str, float], dict[str, float]]:
+        ) -> tuple[
+            dict[str, float], dict[str, float], dict[str, float], dict[str, float], dict[str, float]
+        ]:
             canonical_P = {n: v[0] for n, v in fixed_nodes.items()}
             canonical_h = {n: v[1] for n, v in fixed_nodes.items()}
             for i, n in enumerate(free_nodes):
@@ -625,30 +650,55 @@ class Solver:
             offset = 2 * n_pressure
             for i, n in enumerate(mdot_free_nodes):
                 canonical_mdot[n] = x[offset + i]
-            params = {}
+            canonical_N = dict(fixed_mech)
             offset = 2 * n_pressure + n_mdot
+            for i, n in enumerate(mech_free_nodes):
+                canonical_N[n] = x[offset + i]
+            params = {}
+            offset = 2 * n_pressure + n_mdot + n_mech
             for i, name in enumerate(param_names):
                 params[name] = x[offset + i]
 
-            node_P = {raw: canonical_P[canon] for raw, canon in raw_to_canonical_items}
-            node_h = {raw: canonical_h[canon] for raw, canon in raw_to_canonical_items}
+            # Mechanical/signal port raw ids share this same raw_to_canonical
+            # map (see its construction above) but have no entry in
+            # canonical_P/canonical_h/canonical_mdot (those dicts only ever
+            # cover flow nodes) -- filtered out here exactly like
+            # canonical_mdot already is, rather than assuming every raw id
+            # is a flow node.
+            node_P = {
+                raw: canonical_P[canon]
+                for raw, canon in raw_to_canonical_items
+                if canon in canonical_P
+            }
+            node_h = {
+                raw: canonical_h[canon]
+                for raw, canon in raw_to_canonical_items
+                if canon in canonical_h
+            }
             node_mdot = {
                 raw: canonical_mdot[canon]
                 for raw, canon in raw_to_canonical_items
                 if canon in canonical_mdot
             }
-            return node_P, node_h, node_mdot, params
+            node_N = {
+                raw: canonical_N[canon]
+                for raw, canon in raw_to_canonical_items
+                if canon in canonical_N
+            }
+            return node_P, node_h, node_mdot, node_N, params
 
         def residual_vector(x: np.ndarray) -> np.ndarray:
-            node_P, node_h, node_mdot, params = unpack(x)
+            node_P, node_h, node_mdot, node_N, params = unpack(x)
             state = NetworkState(
                 fluid=fluid,
                 node_P=node_P,
                 node_h=node_h,
                 node_mdot=node_mdot,
                 params=params,
+                node_N=node_N,
             )
             state.node_fluid = network._resolve_node_fluid(state)
+            state.node_signal = network._resolve_node_signal(state)
             residuals: list[float] = []
             for component in network.components:
                 residuals.extend(component.residuals(state))
@@ -670,6 +720,10 @@ class Solver:
             for i in range(n_mdot):
                 if x[offset + i] < self.MDOT_MIN:
                     x[offset + i] = self.MDOT_MIN
+            offset = 2 * n_pressure + n_mdot
+            for i in range(n_mech):
+                if x[offset + i] < self.N_MIN:
+                    x[offset + i] = self.N_MIN
             return x
 
         def step_limit(x: np.ndarray, dx: np.ndarray) -> np.ndarray:
@@ -683,6 +737,8 @@ class Solver:
             positive_definite_indices = [2 * i for i in range(n_pressure)]
             offset = 2 * n_pressure
             positive_definite_indices += [offset + i for i in range(n_mdot)]
+            offset = 2 * n_pressure + n_mdot
+            positive_definite_indices += [offset + i for i in range(n_mech)]
             for i in positive_definite_indices:
                 current = x[i]
                 if current <= 0:
@@ -712,7 +768,7 @@ class Solver:
             # all_params_guess are populated further down — both are read by
             # name here (not passed in), so this sees their final contents
             # by the time newton_solve actually calls step_limit.
-            param_offset = 2 * n_pressure + n_mdot
+            param_offset = 2 * n_pressure + n_mdot + n_mech
             for i, name in enumerate(param_names):
                 idx = param_offset + i
                 current = x[idx]
@@ -774,6 +830,12 @@ class Solver:
         # exchanger's Cmin = min(C_hot, C_cold), even smoothed), that alone
         # can make the very first Jacobian singular.
         canonical_mdot_guess: dict[str, float] = {**fixed_mdot, **guess_mdot}
+        default_N = next(iter(fixed_mech.values())) if fixed_mech else self.DEFAULT_N_FALLBACK
+        # Free nodes' guesses are seeded below, per component, via
+        # guess_free_mechanical_ports() (context-aware; defaults to plain
+        # free_mechanical_ports() when a component doesn't override it) --
+        # fixed_mech is the only thing seeded here.
+        canonical_N_guess: dict[str, float] = dict(fixed_mech)
         for _ in range(len(network.components) + 1):
             for component in network.components:
                 ports = component.ports()
@@ -830,6 +892,10 @@ class Solver:
                 fluid, P_in_guess, h_in_guess, default_mdot
             ).items():
                 free_params[f"{component.name}.{key}"] = guess
+            for port_id, guess in component.guess_free_mechanical_ports(
+                fluid, P_in_guess, h_in_guess, default_mdot
+            ).items():
+                canonical_N_guess.setdefault(network._canonical(port_id), guess)
         param_names[:] = list(free_params.keys()) + list(diff_owner.keys())
         all_params_guess = {**free_params, **diff_params}
 
@@ -842,11 +908,14 @@ class Solver:
             for n in mdot_free_nodes:
                 if n in warm_start.node_mdot:
                     canonical_mdot_guess[n] = warm_start.node_mdot[n]
+            for n in mech_free_nodes:
+                if n in warm_start.node_N:
+                    canonical_N_guess[n] = warm_start.node_N[n]
             for name in param_names:
                 if name in warm_start.params:
                     all_params_guess[name] = warm_start.params[name]
 
-        n_unknowns = 2 * n_pressure + n_mdot + len(param_names)
+        n_unknowns = 2 * n_pressure + n_mdot + n_mech + len(param_names)
 
         x0 = np.zeros(n_unknowns)
         for i, n in enumerate(free_nodes):
@@ -856,6 +925,9 @@ class Solver:
         for i, n in enumerate(mdot_free_nodes):
             x0[offset + i] = canonical_mdot_guess.get(n, default_mdot)
         offset = 2 * n_pressure + n_mdot
+        for i, n in enumerate(mech_free_nodes):
+            x0[offset + i] = canonical_N_guess.get(n, default_N)
+        offset = 2 * n_pressure + n_mdot + n_mech
         for i, name in enumerate(param_names):
             x0[offset + i] = all_params_guess[name]
 
@@ -879,9 +951,10 @@ class Solver:
             raise NetworkTopologyError(message)
 
         if n_unknowns == 0:
-            node_P, node_h, node_mdot, params = unpack(x0)
+            node_P, node_h, node_mdot, node_N, params = unpack(x0)
             final_state = NetworkState(
                 fluid=fluid, node_P=node_P, node_h=node_h, node_mdot=node_mdot, params=params,
+                node_N=node_N,
             )
             node_fluid = network._resolve_node_fluid(final_state)
             return SolveResult(
@@ -896,6 +969,8 @@ class Solver:
                 port_nodes,
                 network.components,
                 node_fluid=node_fluid,
+                node_N=node_N,
+                network=network,
             )
 
         try:
@@ -925,9 +1000,10 @@ class Solver:
             raise ConvergenceError(
                 _failure_context(str(exc), network, n_unknowns, n_equations, dt)
             ) from exc
-        node_P, node_h, node_mdot, params = unpack(x_sol)
+        node_P, node_h, node_mdot, node_N, params = unpack(x_sol)
         final_state = NetworkState(
             fluid=fluid, node_P=node_P, node_h=node_h, node_mdot=node_mdot, params=params,
+            node_N=node_N,
         )
         node_fluid = network._resolve_node_fluid(final_state)
         return SolveResult(
@@ -942,4 +1018,6 @@ class Solver:
             port_nodes,
             network.components,
             node_fluid=node_fluid,
+            node_N=node_N,
+            network=network,
         )

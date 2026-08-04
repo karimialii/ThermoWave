@@ -225,3 +225,57 @@ def test_import_error_message_when_cantera_missing(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(ImportError, match="cantera"):
         Combustor(name="cc1", mdot_fuel=0.02)
+
+
+# --- use_fuel_port=True ----------------------------------------------------
+
+
+def test_use_fuel_port_false_by_default():
+    comb = Combustor(name="cc1", mdot_fuel=0.02)
+    assert comb.use_fuel_port is False
+    assert "fuel_in" not in comb.ports()
+
+
+def test_use_fuel_port_adds_a_third_port():
+    comb = Combustor(name="cc1", use_fuel_port=True)
+    assert comb.ports() == {"in": "cc1.in", "out": "cc1.out", "fuel_in": "cc1.fuel_in"}
+
+
+def test_use_fuel_port_makes_mdot_fuel_no_longer_a_free_parameter():
+    comb = Combustor(name="cc1", use_fuel_port=True)
+    assert comb.free_parameters() == {}
+    assert comb.guess_free_parameters(AIR, 300000.0, AIR.enthalpy_pt(300000.0, 500.0), 1.0) == {}
+
+
+def test_use_fuel_port_reads_mdot_fuel_from_the_fuel_port_mdot():
+    from thermowave.core.network import NetworkState
+
+    comb = Combustor(name="cc1", use_fuel_port=True)
+    P_in, T_in = 300000.0, 500.0
+    h_in = AIR.enthalpy_pt(P_in, T_in)
+    state = NetworkState(
+        fluid=AIR,
+        node_P={"cc1.in": P_in, "cc1.fuel_in": P_in},
+        node_h={"cc1.in": h_in, "cc1.fuel_in": AIR.enthalpy_pt(P_in, 300.0)},
+        node_mdot={"cc1.in": 1.0, "cc1.fuel_in": 0.02},
+    )
+    assert math.isclose(comb._fuel_flow(state), 0.02, rel_tol=1e-9)
+
+
+def test_use_fuel_port_end_to_end_network_solve_with_fixed_fuel_source():
+    src = Source(name="src", P=300000.0, T=500.0, mdot=1.0)
+    fuel_src = Source(name="fuel_src", P=300000.0, T=300.0, mdot=0.02)
+    comb = Combustor(name="cc1", PR=0.96, use_fuel_port=True)
+    snk = Sink(name="snk")
+
+    network = Network(fluid=AIR)
+    for component in (src, fuel_src, comb, snk):
+        network.add_component(component)
+    network.connect(src, "out", comb, "in")
+    network.connect(fuel_src, "out", comb, "fuel_in")
+    network.connect(comb, "out", snk, "in")
+
+    result = network.solve(tol=1e-6, max_iter=100)
+    assert math.isclose(result.node_mdot["cc1.out"], 1.02, rel_tol=1e-9)
+    T_out = AIR.temperature_ph(result.node_P["cc1.out"], result.node_h["cc1.out"])
+    assert T_out > 500.0

@@ -44,10 +44,16 @@ class Setpoint(BaseComponent):
     target_metric already is; whatever free parameter it happens to depend
     on (if any) must be closed elsewhere, exactly as for a constant target.
 
+    free_param may also name a mechanical port left free (e.g. a Turbine/
+    Compressor with N=None exposes "shaft") instead of an ordinary free
+    parameter -- both are validated and closed the same way, just through
+    free_parameters()/closes_parameters() for the former and
+    free_mechanical_ports()/closes_mechanical_nodes() for the latter.
+
     Raises ValueError at construction if the target component doesn't
-    currently declare free_param as free — this is almost always a
-    configuration mistake (forgetting to leave that constructor arg as
-    None), and failing fast here is far clearer than a mismatched Newton
+    currently declare free_param as free (in either sense) — this is almost
+    always a configuration mistake (forgetting to leave that constructor arg
+    as None), and failing fast here is far clearer than a mismatched Newton
     system discovered later as a solver error.
     """
 
@@ -59,11 +65,16 @@ class Setpoint(BaseComponent):
         target_metric: str,
         value: TargetValue,
     ):
-        if free_param not in component.free_parameters():
+        mech_ports = component.mechanical_ports()
+        self._mechanical = (
+            free_param in mech_ports and mech_ports[free_param] in component.free_mechanical_ports()
+        )
+        if not self._mechanical and free_param not in component.free_parameters():
             raise ValueError(
                 f"Setpoint {name!r} targets {component.name!r}.{free_param}, but that "
-                f"component doesn't currently declare {free_param!r} as free — pass "
-                f"None for it at construction so it becomes a solvable unknown."
+                f"component doesn't currently declare {free_param!r} as a free parameter "
+                f"or a free mechanical port — pass None for it at construction so it "
+                f"becomes a solvable unknown."
             )
 
         self.name = name
@@ -79,7 +90,16 @@ class Setpoint(BaseComponent):
         return {}
 
     def closes_parameters(self) -> list[str]:
+        if self._mechanical:
+            return []
         return [f"{self.component.name}.{self.free_param}"]
+
+    def closes_mechanical_nodes(self) -> list[str]:
+        network = getattr(self, "_network", None)
+        if not self._mechanical or network is None:
+            return []
+        port_id = self.component.mechanical_ports()[self.free_param]
+        return [network._canonical(port_id)]
 
     def report_category(self) -> str:
         return "controller"

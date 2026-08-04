@@ -19,27 +19,45 @@ GAMMA = 1005.0 / (1005.0 - 287.05)
 
 
 class _FakeState:
-    def __init__(self, params):
-        self._params = params
+    def __init__(self, node_N=None, params=None):
+        self._node_N = node_N or {}
+        self._params = params or {}
+
+    def N(self, name):
+        return self._node_N[name]
 
     def param(self, name):
         return self._params[name]
 
+    def signal(self, name):
+        return self._node_N[name]  # unused key space reused for simplicity
+
 
 class _FakeShaftComponent:
-    def __init__(self, name, N=None, power=None):
+    def __init__(self, name, N=None, power=None, has_shaft=True):
         self.name = name
         self._N = N
         self._power = power
+        self._has_shaft = has_shaft
+        self._shaft_port = f"{name}.shaft"
+        self._power_port = f"{name}.power"
 
-    def free_parameters(self):
-        return {} if self._N is not None else {"N": 50000.0}
+    def ports(self):
+        return {}
 
-    def report_metrics(self, state):
-        metrics = {}
-        if self._power is not None:
-            metrics["power [W]"] = self._power
-        return metrics
+    def mechanical_ports(self):
+        return {"shaft": self._shaft_port} if self._has_shaft else {}
+
+    def signal_ports(self):
+        return {"power": self._power_port}
+
+    def free_mechanical_ports(self):
+        if not self._has_shaft or self._N is not None:
+            return {}
+        return {self._shaft_port: 50000.0}
+
+    def provided_signal_values(self, state):
+        return {} if self._power is None else {self._power_port: self._power}
 
 
 def _free_pair():
@@ -48,54 +66,68 @@ def _free_pair():
     return comp, turb
 
 
+def _state_for(shaft, N_by_member_index, signal_by_member_index=None):
+    """Build a _FakeState keyed by this shaft's own local mechanical/signal
+    port ids, in member order -- mirrors how, after a real connect(), the
+    shaft's own port id and the member's port id resolve to the same value.
+    """
+    node_N = {
+        list(shaft._mech_ports.values())[i]: N for i, N in enumerate(N_by_member_index)
+    }
+    if signal_by_member_index is not None:
+        for i, power in enumerate(signal_by_member_index):
+            node_N[list(shaft._signal_port_names.values())[i]] = power
+    return _FakeState(node_N=node_N)
+
+
 def test_ports_is_empty():
     comp, turb = _free_pair()
-    shaft = Shaft(name="shaft", components=[comp, turb])
+    shaft = Shaft(name="shaft", members=[comp, turb])
     assert shaft.ports() == {}
 
 
 def test_report_category_is_shaft():
     comp, turb = _free_pair()
-    shaft = Shaft(name="shaft", components=[comp, turb])
+    shaft = Shaft(name="shaft", members=[comp, turb])
     assert shaft.report_category() == "shaft"
 
 
 def test_raises_if_fewer_than_two_components():
     comp, _turb = _free_pair()
     with pytest.raises(ValueError, match="at least 2"):
-        Shaft(name="shaft", components=[comp])
+        Shaft(name="shaft", members=[comp])
 
 
 def test_raises_if_any_component_free_param_not_declared_free():
-    comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=50000.0)
-    _comp2, turb = _free_pair()
-    with pytest.raises(ValueError, match="needs at least .* declaring"):
-        Shaft(name="shaft", components=[comp, turb])
+    comp = _FakeShaftComponent("a", has_shaft=True)
+    other = _FakeShaftComponent("b", has_shaft=False)
+    with pytest.raises(ValueError, match="needs at least .* member"):
+        Shaft(name="shaft", members=[comp, other])
 
 
 def test_raises_if_gear_ratios_length_mismatched():
     comp, turb = _free_pair()
     with pytest.raises(ValueError, match="gear_ratios"):
-        Shaft(name="shaft", components=[comp, turb], gear_ratios=[1.0, 2.0])
+        Shaft(name="shaft", members=[comp, turb], gear_ratios=[1.0, 2.0])
 
 
 def test_raises_if_signs_length_mismatched():
     comp, turb = _free_pair()
     with pytest.raises(ValueError, match="signs"):
-        Shaft(name="shaft", components=[comp, turb], signs=[1.0])
+        Shaft(name="shaft", members=[comp, turb], signs=[1.0])
 
 
 def test_residuals_zero_when_speeds_match_direct_coupling():
     comp, turb = _free_pair()
-    shaft = Shaft(name="shaft", components=[comp, turb])
-    state = _FakeState({"c1.N": 50000.0, "t1.N": 50000.0})
+    shaft = Shaft(name="shaft", members=[comp, turb])
+    state = _state_for(shaft, [50000.0, 50000.0])
     assert math.isclose(shaft.residuals(state)[0], 0.0, abs_tol=1e-9)
 
 
 def test_residuals_reflect_gear_ratio():
     comp, turb = _free_pair()
-    shaft = Shaft(name="shaft", components=[comp, turb], gear_ratios=[2.0])
-    state = _FakeState({"c1.N": 100000.0, "t1.N": 200000.0})
+    shaft = Shaft(name="shaft", members=[comp, turb], gear_ratios=[2.0])
+    state = _state_for(shaft, [100000.0, 200000.0])
     assert math.isclose(shaft.residuals(state)[0], 0.0, abs_tol=1e-9)
 
 
@@ -103,8 +135,8 @@ def test_residuals_one_per_follower_for_three_components():
     a = _FakeShaftComponent("a", N=None)
     b = _FakeShaftComponent("b", N=None)
     c = _FakeShaftComponent("c", N=None)
-    shaft = Shaft(name="shaft", components=[a, b, c])
-    state = _FakeState({"a.N": 1000.0, "b.N": 900.0, "c.N": 1100.0})
+    shaft = Shaft(name="shaft", members=[a, b, c])
+    state = _state_for(shaft, [1000.0, 900.0, 1100.0])
     residuals = shaft.residuals(state)
     assert len(residuals) == 2
     assert math.isclose(residuals[0], -100.0)
@@ -114,8 +146,8 @@ def test_residuals_one_per_follower_for_three_components():
 def test_report_metrics_net_power_uses_signs_and_efficiency():
     a = _FakeShaftComponent("a", N=None, power=1000.0)  # consumer
     b = _FakeShaftComponent("b", N=None, power=1500.0)  # producer
-    shaft = Shaft(name="shaft", components=[a, b], signs=[-1.0, 1.0], efficiency=0.9)
-    state = _FakeState({"a.N": 5000.0, "b.N": 5000.0})
+    shaft = Shaft(name="shaft", members=[a, b], signs=[-1.0, 1.0], efficiency=0.9)
+    state = _state_for(shaft, [5000.0, 5000.0], signal_by_member_index=[1000.0, 1500.0])
     metrics = shaft.report_metrics(state)
     assert math.isclose(metrics["power [W]"], 0.9 * (1500.0 - 1000.0))
     assert math.isclose(metrics["eta [-]"], 0.9)
@@ -125,8 +157,8 @@ def test_report_metrics_net_power_uses_signs_and_efficiency():
 def test_report_metrics_includes_inertia():
     a = _FakeShaftComponent("a", N=None)
     b = _FakeShaftComponent("b", N=None)
-    shaft = Shaft(name="shaft", components=[a, b], inertia=0.75)
-    state = _FakeState({"a.N": 50000.0, "b.N": 50000.0})
+    shaft = Shaft(name="shaft", members=[a, b], inertia=0.75)
+    state = _state_for(shaft, [50000.0, 50000.0], signal_by_member_index=[0.0, 0.0])
     assert math.isclose(shaft.report_metrics(state)["inertia [kg*m^2]"], 0.75)
 
 
@@ -135,7 +167,7 @@ def test_shaft_end_to_end_locks_compressor_and_turbine_speed():
     comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
     heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-100000.0)
     turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
-    shaft = Shaft(name="shaft", components=[comp, turb], signs=[-1.0, 1.0], efficiency=0.98)
+    shaft = Shaft(name="shaft", members=[comp, turb], signs=[-1.0, 1.0], efficiency=0.98)
     snk = Sink(name="snk")
 
     turb_outlet_sensor = Sensor(name="turb_outlet_sensor")
@@ -145,7 +177,7 @@ def test_shaft_end_to_end_locks_compressor_and_turbine_speed():
         sensor=turb_outlet_sensor,
         quantity="T [K]",
         component=comp,
-        free_param="N",
+        free_param="shaft",
         value=target_T,
     )
 
@@ -158,16 +190,20 @@ def test_shaft_end_to_end_locks_compressor_and_turbine_speed():
     network.connect(heater, "out", turb, "in")
     network.connect(turb, "out", turb_outlet_sensor, "tap")
     network.connect(turb, "out", snk, "in")
+    network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
+    network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
+    network.connect(shaft, "p0", comp, "power", kind="signal")
+    network.connect(shaft, "p1", turb, "power", kind="signal")
 
     result = network.solve(tol=1e-8, max_iter=400, damping=0.3)
-    assert math.isclose(result.params["comp.N"], result.params["turb.N"], rel_tol=1e-6)
+    assert math.isclose(result.node_N["comp.shaft"], result.node_N["turb.shaft"], rel_tol=1e-6)
     T_out = AIR.temperature_ph(result.node_P["turb.out"], result.node_h["turb.out"])
     assert math.isclose(T_out, target_T, abs_tol=1e-3)
 
 
 def test_dynamic_shaft_declares_no_differential_state_by_default():
     comp, turb = _free_pair()
-    shaft = Shaft(name="shaft", components=[comp, turb])
+    shaft = Shaft(name="shaft", members=[comp, turb])
     assert shaft.differential_parameters() == {}
     assert shaft.state_derivative(state=None) == {}
 
@@ -175,21 +211,21 @@ def test_dynamic_shaft_declares_no_differential_state_by_default():
 def test_dynamic_shaft_raises_if_inertia_not_positive():
     comp, turb = _free_pair()
     with pytest.raises(ValueError, match="inertia"):
-        Shaft(name="shaft", components=[comp, turb], dynamic=True, inertia=0.0)
+        Shaft(name="shaft", members=[comp, turb], dynamic=True, inertia=0.0)
 
 
 def test_dynamic_shaft_gear_ratios_need_one_entry_per_component_not_follower():
     comp, turb = _free_pair()
     with pytest.raises(ValueError, match="gear_ratios"):
         Shaft(
-            name="shaft", components=[comp, turb], dynamic=True, inertia=0.05,
+            name="shaft", members=[comp, turb], dynamic=True, inertia=0.05,
             gear_ratios=[1.0],  # would be valid for dynamic=False, not dynamic=True
         )
 
 
 def test_dynamic_shaft_declares_differential_parameter_seeded_by_n0():
     comp, turb = _free_pair()
-    shaft = Shaft(name="shaft", components=[comp, turb], dynamic=True, inertia=0.05, N0=42000.0)
+    shaft = Shaft(name="shaft", members=[comp, turb], dynamic=True, inertia=0.05, N0=42000.0)
     assert shaft.differential_parameters() == {"N": 42000.0}
 
 
@@ -198,10 +234,11 @@ def test_dynamic_shaft_residuals_couple_every_component_to_shaft_speed():
     b = _FakeShaftComponent("b", N=None)
     c = _FakeShaftComponent("c", N=None)
     shaft = Shaft(
-        name="shaft", components=[a, b, c], dynamic=True, inertia=0.05,
+        name="shaft", members=[a, b, c], dynamic=True, inertia=0.05,
         gear_ratios=[1.0, 2.0, 0.5],
     )
-    state = _FakeState({"a.N": 1000.0, "b.N": 2000.0, "c.N": 500.0, "shaft.N": 1000.0})
+    state = _state_for(shaft, [1000.0, 2000.0, 500.0])
+    state._params["shaft.N"] = 1000.0
     residuals = shaft.residuals(state)
     assert len(residuals) == 3
     for residual in residuals:
@@ -212,10 +249,11 @@ def test_dynamic_shaft_state_derivative_is_zero_when_powers_balance():
     a = _FakeShaftComponent("a", N=None, power=1000.0)  # consumer
     b = _FakeShaftComponent("b", N=None, power=1000.0)  # producer, exactly balances
     shaft = Shaft(
-        name="shaft", components=[a, b], signs=[-1.0, 1.0],
+        name="shaft", members=[a, b], signs=[-1.0, 1.0],
         dynamic=True, inertia=0.05,
     )
-    state = _FakeState({"a.N": 5000.0, "b.N": 5000.0, "shaft.N": 5000.0})
+    state = _state_for(shaft, [5000.0, 5000.0], signal_by_member_index=[1000.0, 1000.0])
+    state._params["shaft.N"] = 5000.0
     assert math.isclose(shaft.state_derivative(state)["N"], 0.0, abs_tol=1e-9)
 
 
@@ -223,18 +261,20 @@ def test_dynamic_shaft_state_derivative_positive_when_net_power_positive():
     a = _FakeShaftComponent("a", N=None, power=1000.0)  # consumer
     b = _FakeShaftComponent("b", N=None, power=1500.0)  # producer, net positive
     shaft = Shaft(
-        name="shaft", components=[a, b], signs=[-1.0, 1.0],
+        name="shaft", members=[a, b], signs=[-1.0, 1.0],
         dynamic=True, inertia=0.05,
     )
-    state = _FakeState({"a.N": 5000.0, "b.N": 5000.0, "shaft.N": 5000.0})
+    state = _state_for(shaft, [5000.0, 5000.0], signal_by_member_index=[1000.0, 1500.0])
+    state._params["shaft.N"] = 5000.0
     assert shaft.state_derivative(state)["N"] > 0.0
 
 
 def test_dynamic_shaft_report_metrics_reads_speed_from_differential_state():
     a = _FakeShaftComponent("a", N=None)
     b = _FakeShaftComponent("b", N=None)
-    shaft = Shaft(name="shaft", components=[a, b], dynamic=True, inertia=0.05)
-    state = _FakeState({"a.N": 5000.0, "b.N": 5000.0, "shaft.N": 4321.0})
+    shaft = Shaft(name="shaft", members=[a, b], dynamic=True, inertia=0.05)
+    state = _state_for(shaft, [5000.0, 5000.0], signal_by_member_index=[0.0, 0.0])
+    state._params["shaft.N"] = 4321.0
     assert math.isclose(shaft.report_metrics(state)["N [rev/min]"], 4321.0)
 
 
@@ -246,7 +286,7 @@ def test_shaft_warns_when_dynamic_efficiency_would_silently_cancel():
     comp, turb = _free_pair()
     with pytest.warns(UserWarning, match="efficiency scales the \\*net\\* shaft power"):
         Shaft(
-            name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
+            name="shaft", members=[comp, turb], signs=[-1.0, 1.0],
             efficiency=0.98, inertia=0.05, dynamic=True, N0=60000.0,
         )
 
@@ -256,7 +296,7 @@ def test_shaft_does_not_warn_for_dynamic_with_unity_efficiency():
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # any warning becomes a failure
         Shaft(
-            name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
+            name="shaft", members=[comp, turb], signs=[-1.0, 1.0],
             efficiency=1.0, inertia=0.05, dynamic=True, N0=60000.0,
         )
 
@@ -266,4 +306,4 @@ def test_shaft_does_not_warn_for_static_efficiency():
     comp, turb = _free_pair()
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        Shaft(name="shaft", components=[comp, turb], signs=[-1.0, 1.0], efficiency=0.98)
+        Shaft(name="shaft", members=[comp, turb], signs=[-1.0, 1.0], efficiency=0.98)

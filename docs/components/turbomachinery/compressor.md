@@ -7,7 +7,8 @@ Driven by a Flownex-style (`.cop`) characteristic map instead of a fixed
 map's iso-speed curves at the compressor's shaft speed `N` and the corrected
 mass flow implied by the current inlet state.
 
-**Ports:** `in`, `out` &nbsp;·&nbsp; **Parameters:** `map_path`, `gamma`
+**Ports:** `in`, `out` &nbsp;·&nbsp; mechanical: `shaft` &nbsp;·&nbsp;
+signal: `power` &nbsp;·&nbsp; **Parameters:** `map_path`, `gamma`
 (optional), `N` (shaft speed `[rev/min]`; leave `None` to solve for it),
 `factor_overrides` (optional map calibration), `heat_path` (optional)
 
@@ -23,11 +24,16 @@ $$
 
 then the same isentropic relation as [`SimpleCompressor`](simple-compressor.md)
 using this `PR` and `eta_s`. **Free parameter:** leave `N=None` to solve for
-shaft speed instead of a fixed `PR`/power (needs a matching
-[`Setpoint`](../control/setpoint.md)/[`Controller`](../control/controller.md)/
-[`Shaft`](../mechanical/shaft.md) residual). `factor_overrides` lets you
-calibrate the map's own conversion factors against test data without
-editing the map file.
+shaft speed instead of a fixed `PR`/power — `N` lives on the `"shaft"`
+mechanical port either way (fixed when given, a free Newton unknown when
+`None`), needing a matching
+[`Setpoint`](../control/setpoint.md)/[`Controller`](../control/controller.md)
+(`free_param="shaft"`) or [`Shaft`](../mechanical/shaft.md) connection
+(`kind="mechanical"`) to close it. `factor_overrides` lets you calibrate
+the map's own conversion factors against test data without editing the map
+file. The `"power"` signal port publishes the same value as
+`report_metrics()["power [W]"]`, for a `Generator`/`Shaft` to read via
+`kind="signal"`.
 
 ---
 Part of [Turbomachinery](index.md).

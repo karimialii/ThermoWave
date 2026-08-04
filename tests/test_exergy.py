@@ -5,7 +5,7 @@ import pytest
 from thermowave.components.electric_motor import ElectricMotor
 from thermowave.components.simple_compressor import SimpleCompressor
 from thermowave.components.simple_condenser import SimpleCondenser
-from thermowave.components.simple_heat_exchanger import SimpleHeatExchanger
+from thermowave.components.heat_exchanger import HeatExchanger
 from thermowave.components.simple_turbine import SimpleTurbine
 from thermowave.components.sink import Sink
 from thermowave.components.source import Source
@@ -176,7 +176,7 @@ def test_compressor_cost_has_swapped_fuel_product_roles():
 def test_two_stream_hx_default_costs_cold_side_gain_as_product():
     hot_src = Source(name="hot_src", P=101325.0, T=500.0, mdot=1.0)
     cold_src = Source(name="cold_src", P=101325.0, T=300.0, mdot=1.0)
-    hx = SimpleHeatExchanger(name="hx", effectiveness=0.7, PR_hot=1.0, PR_cold=1.0)
+    hx = HeatExchanger(name="hx", PR_hot=1.0, PR_cold=1.0, effectiveness=0.7)
     hot_snk = Sink(name="hot_snk")
     cold_snk = Sink(name="cold_snk")
     result = _solved_state(
@@ -203,7 +203,7 @@ def test_two_stream_hx_default_costs_cold_side_gain_as_product():
 def test_two_stream_hx_dissipative_has_no_product_and_feeds_e_l_not_e_d():
     hot_src = Source(name="hot_src", P=101325.0, T=500.0, mdot=1.0)
     cold_src = Source(name="cold_src", P=101325.0, T=300.0, mdot=1.0)
-    hx = SimpleHeatExchanger(name="cooler", effectiveness=0.7, PR_hot=1.0, PR_cold=1.0)
+    hx = HeatExchanger(name="cooler", PR_hot=1.0, PR_cold=1.0, effectiveness=0.7)
     hot_snk = Sink(name="hot_snk")
     cold_snk = Sink(name="cold_snk")
     net = Network(fluid=AIR)
@@ -233,7 +233,7 @@ def test_dissipative_rejects_non_two_stream_hx_name():
     net.add_component(snk)
     net.connect(src, "out", snk, "in")
     result = net.solve(progress=False)
-    with pytest.raises(ValueError, match="SimpleHeatExchanger"):
+    with pytest.raises(ValueError, match="HeatExchanger"):
         exergy_report(result, T0, P0, fuel=[0.0], product=[0.0], dissipative=["src"])
 
 
@@ -268,9 +268,7 @@ def test_single_stream_condenser_costed_only_with_source_temperature():
 
 
 def test_power_only_components_are_not_costed():
-    motor = ElectricMotor(name="motor", component=SimpleCompressor(
-        name="c", PR=2.0, eta_s=0.8, gamma=1.4
-    ), efficiency=0.95)
+    motor = ElectricMotor(name="motor", efficiency=0.95)
     from thermowave.core.exergy import _cost_component
 
     class _FakeStateForMotor:

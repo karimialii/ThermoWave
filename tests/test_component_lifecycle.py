@@ -122,15 +122,15 @@ def test_replace_component_swaps_a_setpoint_for_a_pid_and_stays_square():
     # residual each; keeping both would over-determine the system by one.
     network, comp, sensor = _free_speed_compressor_network()
     setpoint = Setpoint(
-        name="sp", component=comp, free_param="N", target_metric="PR [-]", value=2.5
+        name="sp", component=comp, free_param="shaft", target_metric="PR [-]", value=2.5
     )
     network.add_component(setpoint)
     steady = network.solve(tol=1e-8, max_iter=300, damping=0.5, progress=False)
 
     pid = PIDController(
-        name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
+        name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft",
         setpoint=420.0, Kp=60.0, Ki=50.0, Kd=0.0,
-        output0=steady.params["comp.N"],
+        output0=steady.node_N["comp.shaft"],
     )
     network.replace_component(setpoint, pid)
 
@@ -139,24 +139,24 @@ def test_replace_component_swaps_a_setpoint_for_a_pid_and_stays_square():
     after = network.solve(tol=1e-8, max_iter=300, damping=0.5, progress=False)
     # The PID pins N to output0, which was seeded from the steady solve, so
     # this must re-find the same operating point.
-    assert math.isclose(after.params["comp.N"], steady.params["comp.N"], rel_tol=1e-6)
+    assert math.isclose(after.node_N["comp.shaft"], steady.node_N["comp.shaft"], rel_tol=1e-6)
 
 
 def test_check_wiring_names_a_doubly_closed_free_parameter():
     network, comp, sensor = _free_speed_compressor_network()
     network.add_component(
-        Setpoint(name="sp", component=comp, free_param="N", target_metric="PR [-]", value=2.5)
+        Setpoint(name="sp", component=comp, free_param="shaft", target_metric="PR [-]", value=2.5)
     )
     network.add_component(
         PIDController(
-            name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
+            name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft",
             setpoint=420.0, Kp=1.0, output0=60000.0,
         )
     )
 
     problems = network.check_wiring()
 
-    assert any("comp.N" in p and "closed by 2" in p for p in problems)
+    assert any("comp.shaft" in p and "closed by 2" in p for p in problems)
 
 
 def test_check_wiring_names_an_unclosed_free_parameter():
@@ -164,13 +164,13 @@ def test_check_wiring_names_an_unclosed_free_parameter():
 
     problems = network.check_wiring()
 
-    assert any("comp.N" in p and "nothing closes it" in p for p in problems)
+    assert any("comp.shaft" in p and "nothing closes it" in p for p in problems)
 
 
 def test_check_wiring_names_a_controller_left_pointing_at_a_removed_component():
     network, comp, sensor = _free_speed_compressor_network()
     setpoint = Setpoint(
-        name="sp", component=comp, free_param="N", target_metric="PR [-]", value=2.5
+        name="sp", component=comp, free_param="shaft", target_metric="PR [-]", value=2.5
     )
     network.add_component(setpoint)
 
@@ -183,7 +183,7 @@ def test_check_wiring_names_a_controller_left_pointing_at_a_removed_component():
 def test_check_wiring_is_quiet_on_a_correctly_wired_network():
     network, comp, _ = _free_speed_compressor_network()
     network.add_component(
-        Setpoint(name="sp", component=comp, free_param="N", target_metric="PR [-]", value=2.5)
+        Setpoint(name="sp", component=comp, free_param="shaft", target_metric="PR [-]", value=2.5)
     )
 
     assert network.check_wiring() == []
@@ -194,11 +194,11 @@ def test_non_square_solve_error_names_the_doubly_closed_parameter():
     # at fault; check_wiring()'s findings get appended to it.
     network, comp, sensor = _free_speed_compressor_network()
     network.add_component(
-        Setpoint(name="sp", component=comp, free_param="N", target_metric="PR [-]", value=2.5)
+        Setpoint(name="sp", component=comp, free_param="shaft", target_metric="PR [-]", value=2.5)
     )
     network.add_component(
         PIDController(
-            name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="N",
+            name="pid", sensor=sensor, quantity="T [K]", component=comp, free_param="shaft",
             setpoint=420.0, Kp=1.0, output0=60000.0,
         )
     )
@@ -208,13 +208,13 @@ def test_non_square_solve_error_names_the_doubly_closed_parameter():
 
     message = str(excinfo.value)
     assert "Likely cause:" in message
-    assert "comp.N" in message
+    assert "comp.shaft" in message
 
 
 def test_solve_result_state_round_trips_for_report_metrics():
     network, comp, _ = _free_speed_compressor_network()
     network.add_component(
-        Setpoint(name="sp", component=comp, free_param="N", target_metric="PR [-]", value=2.5)
+        Setpoint(name="sp", component=comp, free_param="shaft", target_metric="PR [-]", value=2.5)
     )
     result = network.solve(tol=1e-8, max_iter=300, damping=0.5, progress=False)
 
@@ -238,7 +238,7 @@ def test_check_wiring_recognises_a_shaft_as_closing_its_members_speeds():
         name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None
     )
     shaft = Shaft(
-        name="shaft", components=[comp, turb], signs=[-1.0, 1.0],
+        name="shaft", members=[comp, turb], signs=[-1.0, 1.0],
         efficiency=1.0, inertia=0.05, dynamic=True, N0=60_000.0,
     )
     snk = Sink(name="snk")
@@ -248,6 +248,10 @@ def test_check_wiring_recognises_a_shaft_as_closing_its_members_speeds():
     network.connect(comp, "out", heater, "in")
     network.connect(heater, "out", turb, "in")
     network.connect(turb, "out", snk, "in")
+    network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
+    network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
+    network.connect(shaft, "p0", comp, "power", kind="signal")
+    network.connect(shaft, "p1", turb, "power", kind="signal")
 
     assert network.check_wiring() == []
 
@@ -262,15 +266,20 @@ def test_check_wiring_flags_a_static_shafts_unclosed_reference_speed():
     turb = Turbine(
         name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None
     )
-    shaft = Shaft(name="shaft", components=[comp, turb], signs=[-1.0, 1.0])
+    shaft = Shaft(name="shaft", members=[comp, turb], signs=[-1.0, 1.0])
 
     network = Network(fluid=AIR)
     for component in (comp, turb, shaft):
         network.add_component(component)
+    network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
+    network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
 
     problems = network.check_wiring()
-    assert any("comp.N" in p and "nothing closes it" in p for p in problems)
-    assert not any("turb.N" in p for p in problems)  # tied to comp, so closed
+    # The canonical mechanical node id is whichever port id connect() rooted
+    # the union at ("shaft.m0" here, from connect(shaft, "m0", comp, ...));
+    # what matters is that exactly the reference speed is reported free.
+    assert any("shaft.m0" in p and "nothing closes it" in p for p in problems)
+    assert not any("shaft.m1" in p for p in problems)  # tied to comp, so closed
 
 
 def test_convergence_failure_reports_the_system_size():
@@ -283,7 +292,7 @@ def test_convergence_failure_reports_the_system_size():
     network, comp, sensor = _free_speed_compressor_network()
     network.add_component(
         Setpoint(
-            name="sp", component=comp, free_param="N",
+            name="sp", component=comp, free_param="shaft",
             target_metric="PR [-]", value=500.0,  # unreachable on this map
         )
     )
@@ -305,7 +314,7 @@ def test_convergence_failure_surfaces_wiring_problems_when_there_are_any():
 
     network, comp, sensor = _free_speed_compressor_network()
     network.add_component(
-        Setpoint(name="sp", component=comp, free_param="N",
+        Setpoint(name="sp", component=comp, free_param="shaft",
                  target_metric="PR [-]", value=500.0)
     )
     network.remove_component(sensor)  # harmless here, keeps the system square
@@ -318,7 +327,7 @@ def test_convergence_failure_surfaces_wiring_problems_when_there_are_any():
 def test_successful_solve_is_unaffected_by_the_failure_diagnostics():
     network, comp, _ = _free_speed_compressor_network()
     network.add_component(
-        Setpoint(name="sp", component=comp, free_param="N", target_metric="PR [-]", value=2.5)
+        Setpoint(name="sp", component=comp, free_param="shaft", target_metric="PR [-]", value=2.5)
     )
 
     result = network.solve(tol=1e-8, max_iter=300, damping=0.5, progress=False)

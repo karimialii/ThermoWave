@@ -7,10 +7,11 @@ AIR = IdealGasFluid(name="air", R=287.05, cp=1005.0)
 
 
 class _FakeState:
-    def __init__(self, fluid, mdot: dict[str, float], node_values: dict[str, tuple[float, float]]):
+    def __init__(self, fluid, mdot, node_values, params=None):
         self.fluid = fluid
         self._mdot = mdot
         self._node_values = node_values
+        self._params = params or {}
 
     def node(self, name: str) -> tuple[float, float]:
         return self._node_values[name]
@@ -21,98 +22,91 @@ class _FakeState:
     def mdot(self, name: str) -> float:
         return self._mdot[name]
 
+    def param(self, name: str) -> float:
+        return self._params[name]
 
-def _balanced_case(effectiveness=0.7, PR_hot=0.95, PR_cold=0.9):
-    mdot_hot, mdot_cold = 1.0, 1.2
-    P_hot, T_hot_in = 300000.0, 500.0
-    P_cold, T_cold_in = 300000.0, 300.0
-    h_hot_in = AIR.enthalpy_pt(P_hot, T_hot_in)
-    h_cold_in = AIR.enthalpy_pt(P_cold, T_cold_in)
 
-    hx = SimpleHeatExchanger(name="hx1", effectiveness=effectiveness, PR_hot=PR_hot, PR_cold=PR_cold)
+def _case(Q=50_000.0, PR=0.98):
+    mdot = 1.5
+    P_in, T_in = 300000.0, 400.0
+    h_in = AIR.enthalpy_pt(P_in, T_in)
 
-    C_min = min(mdot_hot, mdot_cold) * 1005.0
-    Q = effectiveness * C_min * (T_hot_in - T_cold_in)
+    hx = SimpleHeatExchanger(name="hx1", Q=Q, PR=PR)
 
-    h_hot_out = h_hot_in - Q / mdot_hot
-    h_cold_out = h_cold_in + Q / mdot_cold
-    P_hot_out = PR_hot * P_hot
-    P_cold_out = PR_cold * P_cold
+    h_out = h_in + Q / mdot
+    P_out = PR * P_in
 
     state = _FakeState(
         fluid=AIR,
-        mdot={
-            "hx1.hot_in": mdot_hot,
-            "hx1.hot_out": mdot_hot,
-            "hx1.cold_in": mdot_cold,
-            "hx1.cold_out": mdot_cold,
-        },
-        node_values={
-            "hx1.hot_in": (P_hot, h_hot_in),
-            "hx1.hot_out": (P_hot_out, h_hot_out),
-            "hx1.cold_in": (P_cold, h_cold_in),
-            "hx1.cold_out": (P_cold_out, h_cold_out),
-        },
+        mdot={"hx1.in": mdot, "hx1.out": mdot},
+        node_values={"hx1.in": (P_in, h_in), "hx1.out": (P_out, h_out)},
     )
     return hx, state, Q
 
 
-def test_ports_returns_four_ports_derived_from_name():
-    hx = SimpleHeatExchanger(name="hx1", effectiveness=0.7, PR_hot=0.95, PR_cold=0.9)
-    assert hx.ports() == {
-        "hot_in": "hx1.hot_in",
-        "hot_out": "hx1.hot_out",
-        "cold_in": "hx1.cold_in",
-        "cold_out": "hx1.cold_out",
-    }
+def test_ports_returns_in_and_out_derived_from_name():
+    hx = SimpleHeatExchanger(name="hx1", Q=1000.0)
+    assert hx.ports() == {"in": "hx1.in", "out": "hx1.out"}
 
 
 def test_residuals_all_zero_at_exact_hand_calc_solution():
-    hx, state, _Q = _balanced_case()
+    hx, state, _Q = _case()
     residuals = hx.residuals(state)
-    assert len(residuals) == 6
+    assert len(residuals) == 3
     for r in residuals:
         assert math.isclose(r, 0.0, abs_tol=1e-6)
 
 
-def test_duty_matches_effectiveness_hand_calc():
-    hx, state, Q_expected = _balanced_case()
-    assert math.isclose(hx._duty(state), Q_expected, rel_tol=1e-9)
-
-
-def test_duty_scales_linearly_with_effectiveness():
-    hx_half, state_half, _ = _balanced_case(effectiveness=0.5)
-    hx_full, state_full, _ = _balanced_case(effectiveness=1.0)
-    assert math.isclose(hx_full._duty(state_full), 2.0 * hx_half._duty(state_half), rel_tol=1e-9)
+def test_negative_q_cools_the_stream():
+    hx, state, Q = _case(Q=-40_000.0)
+    assert Q < 0.0
+    momentum, energy, mass = hx.residuals(state)
+    assert math.isclose(energy, 0.0, abs_tol=1e-6)
 
 
 def test_momentum_residual_matches_pressure_ratio_hand_calc():
-    hx, state, _Q = _balanced_case(PR_hot=0.9, PR_cold=0.85)
-    residuals = hx.residuals(state)
-    hot_momentum_residual, _he, _hm, cold_momentum_residual, _ce, _cm = residuals
-    assert math.isclose(hot_momentum_residual, 0.0, abs_tol=1e-6)
-    assert math.isclose(cold_momentum_residual, 0.0, abs_tol=1e-6)
+    hx, state, _Q = _case(PR=0.9)
+    momentum_residual, _energy, _mass = hx.residuals(state)
+    assert math.isclose(momentum_residual, 0.0, abs_tol=1e-6)
 
 
-def test_report_metrics_includes_power_and_pressure_ratios():
-    hx, state, Q_expected = _balanced_case(PR_hot=0.9, PR_cold=0.85)
+def test_report_metrics_includes_power_and_pressure_ratio():
+    hx, state, Q_expected = _case(PR=0.85)
     metrics = hx.report_metrics(state)
     assert math.isclose(metrics["power [W]"], Q_expected, rel_tol=1e-9)
-    assert metrics["PR_hot [-]"] == 0.9
-    assert metrics["PR_cold [-]"] == 0.85
-
-
-def test_simple_heat_exchanger_rejects_effectiveness_out_of_range():
-    try:
-        SimpleHeatExchanger(name="hx1", effectiveness=1.5, PR_hot=1.0, PR_cold=1.0)
-        assert False, "expected ValueError"
-    except ValueError:
-        pass
+    assert metrics["PR [-]"] == 0.85
 
 
 def test_simple_heat_exchanger_rejects_non_positive_pr():
     try:
-        SimpleHeatExchanger(name="hx1", effectiveness=0.8, PR_hot=0.0, PR_cold=1.0)
+        SimpleHeatExchanger(name="hx1", Q=1000.0, PR=0.0)
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def test_free_parameters_empty_when_q_given():
+    hx = SimpleHeatExchanger(name="hx1", Q=1000.0)
+    assert hx.free_parameters() == {}
+
+
+def test_free_parameters_includes_q_when_q_omitted():
+    hx = SimpleHeatExchanger(name="hx1", Q=None)
+    assert hx.free_parameters() == {"Q": 0.0}
+
+
+def test_residuals_use_q_from_state_param_when_q_omitted():
+    mdot = 1.5
+    P_in, T_in = 300000.0, 400.0
+    h_in = AIR.enthalpy_pt(P_in, T_in)
+    Q = 25_000.0
+    hx = SimpleHeatExchanger(name="hx1", Q=None, PR=1.0)
+    h_out = h_in + Q / mdot
+    state = _FakeState(
+        fluid=AIR,
+        mdot={"hx1.in": mdot, "hx1.out": mdot},
+        node_values={"hx1.in": (P_in, h_in), "hx1.out": (P_in, h_out)},
+        params={"hx1.Q": Q},
+    )
+    momentum, energy, mass = hx.residuals(state)
+    assert math.isclose(energy, 0.0, abs_tol=1e-6)
