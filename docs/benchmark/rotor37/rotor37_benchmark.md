@@ -3,13 +3,22 @@
 `rotor37_benchmark.py` checks ThermoWave's `SimpleCompressor` against the
 published design point of NASA Rotor 37, a transonic axial compressor rotor
 that has served as an open turbomachinery CFD validation case since the
-1994 IGTI blind test.
+1994 IGTI blind test. ThermoWave's solved exit temperature and shaft power
+agree with a hand calculation from NASA's published (PR, eta_s) to machine
+precision (~1e-16 relative error) — confirming `SimpleCompressor`'s
+residual equations encode the isentropic-efficiency relation correctly. A
+pressure-ratio sweep (below) then shows where that single design point
+sits on the compressor's broader operating range.
 
 Run it directly, no optional extras required:
 
 ```bash
-python docs/benchmark/rotor37/rotor37_benchmark.py
+python rotor37_benchmark.py
 ```
+
+The script lives at the repo root and isn't tracked in git (gitignored —
+it'll move to its own repo later); run it from the ThermoWave repo root as
+shown above.
 
 ## The reference data
 
@@ -122,6 +131,36 @@ reasonable, independently useful number: it's the actual work Rotor 37
 does on the air at its design point, derivable from NASA's own published
 (PR, eta_s, mdot) without needing anything ThermoWave-specific — a good
 sanity figure to keep in mind for a rotor of this size and pressure ratio.
+
+## The design point in context: a pressure-ratio sweep
+
+A single-point agreement check like the one above is, by construction, a
+thin thing to look at on its own — both sides are evaluating the same
+formula, so of course they match. What that number doesn't show is *where*
+Rotor 37's design point sits relative to the compressor's broader operating
+range.
+
+`plot_results.py` (same directory as this file) fills that gap. It builds
+and solves a fresh ThermoWave network — through the actual solver, not the
+hand-calc formula — at 41 pressure ratios spanning 1.5 to 2.5, holding
+`eta_s`, inlet state, and mass flow at their published design values, and
+records the solved shaft power and exit temperature at each point:
+
+```bash
+python docs/benchmark/rotor37/plot_results.py
+```
+
+![ThermoWave PR sweep around the Rotor 37 design point](pr_sweep.png)
+
+Both curves are smooth and monotonic in PR, as expected from the
+isentropic relation with fixed `eta_s`, and the NASA design point
+(PR = 2.106, marked in red) sits in the middle of the swept range rather
+than at an edge — i.e., it's an unremarkable, well-behaved operating
+condition for the model, not a corner case. This doesn't validate anything
+beyond what the single-point check already does (it's the same relation,
+just evaluated at more points); what it adds is the shape of the
+power/temperature response around the design point, which the single
+number alone can't convey.
 
 ## Why there's no map-based validation here
 

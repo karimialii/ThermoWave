@@ -6,7 +6,7 @@ network's own state.
 WHAT THIS COVERS
 -----------------
 - Per-node physical exergy (e_PH, split into thermal e_T and mechanical e_M
-  components, matching the convention TESPy/exerpy report), for any node
+  components, the standard SPECO decomposition), for any node
   whose fluid exposes entropy_ph (CoolPropFluid, IdealGasFluid,
   IdealGasMixtureFluid -- see fluids/base_fluid.py's ConstantCpFluid and
   fluids/two_phase.py's supports_entropy()). CanteraFluid nodes raise a
@@ -80,8 +80,8 @@ _SINGLE_STREAM_PHASE_CHANGE_PORTS = ("in", "out")  # SimpleEvaporator/SimpleCond
 class NodeExergy:
     """Specific (e_*, J/kg) and flow-rate (E_*, W) physical exergy at one
     node, split into thermal (e_T) and mechanical (e_M) components:
-    e_PH = e_T + e_M, matching the TESPy/exerpy convention this was checked
-    against. E_* is None where the node's mdot isn't part of the solve
+    e_PH = e_T + e_M, the standard SPECO thermal/mechanical decomposition.
+    E_* is None where the node's mdot isn't part of the solve
     (mirrors Sensor.report_metrics()'s own "omit mdot [kg/s] if unavailable"
     behavior, not a separate special case invented here).
     """
@@ -277,7 +277,7 @@ class ExergyReport:
     covers). E_D is the sum of every costed, non-dissipative component's
     own E_D; E_L is the sum of dissipative components' whole E_F,
     reclassified as a loss to the environment rather than an internal
-    irreversibility -- the standard TESPy-style destruction/loss
+    irreversibility -- the standard exergy destruction/loss
     distinction. epsilon is E_P/E_F, None if E_F is ~0.
     """
 

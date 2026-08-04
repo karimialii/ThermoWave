@@ -1,9 +1,14 @@
 # Benchmark: 30 MWe SEGS solar Rankine cycle, design point
 
-`segs_exergy_benchmark.py` builds and solves the water/steam power cycle of
-a 30 MWe SEGS (Solar Energy Generating System) parabolic-trough plant in
-ThermoWave, at its 100%-solar design point, and compares it directly
-against the **original published source**:
+**PASS.** `segs_exergy_benchmark.py` builds and solves the water/steam
+power cycle of a 30 MWe SEGS (Solar Energy Generating System)
+parabolic-trough plant in ThermoWave, at its 100%-solar design point, and
+reproduces every turbine stage's published power output to within 0.12%
+(total: -0.05%), closes the full mass balance through a 5-heater
+condensate-cascade drain train exactly, and matches the paper's own
+gross mechanical/electrical output almost exactly (36063 vs. 36067 kW,
+34981 vs. 34985 kWe). It's checked directly against the **original
+published source**:
 
 > F. Lippke, *Simulation of the Part-Load Behavior of a 30 MWe SEGS
 > Plant*, SAND95-1293, Sandia National Laboratories, 1995.
@@ -11,20 +16,15 @@ against the **original published source**:
 > mass flow / pressure / efficiency / UA) and Fig. 4 (the design heat
 > balance) are the source of every number this benchmark compares against.
 
-This plant is also the subject of a TESPy exergy-analysis example repo
-([`docs/benchmark/Tespy/SEGS_exergy-main`](https://github.com/karimialii/ThermoWave/tree/main/docs/benchmark/Tespy/SEGS_exergy-main)),
-which was run this session for cross-checking. Per the scope asked for
-here, **the comparison below is ThermoWave vs. the original 1995 paper
-only** — TESPy's own numbers are deliberately not part of it. See
-"What the TESPy run was for" at the end for what that run did and why it
-isn't in the main comparison.
-
 Run it directly (needs the `coolprop` extra):
 
 ```bash
 pip install thermowave[coolprop]
-python docs/benchmark/segs_exergy/segs_exergy_benchmark.py
+python segs_exergy_benchmark.py
 ```
+
+(The script lives at the repo root and is gitignored there — it will move
+to its own repo later.)
 
 ## The cycle
 
@@ -108,6 +108,8 @@ step_growth=1.03, warm_start=...)` converges cleanly in 51 iterations.
 Table 3 hands over each stage's design `genPower` [kW] directly — a clean,
 node-level comparison with no free parameters left to tune:
 
+![ThermoWave vs. published turbine stage power](turbine_stage_power.png)
+
 ```
 stage    ThermoWave [kW]   paper [kW]   diff
 hpt1          7634.75        7643.54    -0.11%
@@ -177,11 +179,11 @@ Lower than published, mainly because `Pump`'s discharge pressures here
 not derived from Table 3 (which gives quadratic pressure-drop
 *coefficients* for EASY's own part-load formula in an internal, unstated
 unit convention — not a single design-point ΔP; see the script's earlier
-version notes). Table 2's own published parasitics also fold in the motor
-efficiency (0.95, Table 1) `Pump` here doesn't model — matches the same
-mechanical-vs-electrical distinction the
-[`sco2_recompression`](../sco2_recompression/sco2_recompression_benchmark.md)
-benchmark ran into with TESPy's turbine/generator split.
+version notes). Table 2's own published parasitics also fold in a motor
+efficiency (0.95, Table 1) that `Pump` here doesn't model — a
+mechanical-vs-electrical distinction, not a bug: what ThermoWave computes
+is shaft work, and the paper's own figure is the larger electrical draw
+needed to deliver that shaft work through a real motor.
 
 ### Gross and net output
 
@@ -214,12 +216,13 @@ than picking one and calling it the same number.
 
 ### ThermoWave's own exergy analysis (no paper equivalent)
 
-The 1995 paper predates exergy analysis of this specific plant (that's
-what the companion TESPy repo adds, decades later) — there's no published
-number to check the table below against. Included anyway as a genuine
-value-add, using `thermowave.core.exergy.exergy_report` with `fuel` =
-boiler + reheat duty and `product` = net turbine power (turbines minus
-condensate/feed pump work):
+The 1995 paper predates exergy analysis of this specific plant — there's
+no published number to check the table below against. Included anyway as
+a genuine value-add, using `thermowave.core.exergy.exergy_report` with
+`fuel` = boiler + reheat duty and `product` = net turbine power (turbines
+minus condensate/feed pump work):
+
+![Per-component exergy destruction and exergetic efficiency](exergy_efficiency.png)
 
 ```
 component         E_F [W]      E_P [W]      E_D [W]   epsilon [%]
@@ -241,7 +244,8 @@ low `etas0 = 0.6445` for that stage — the paper's own EASY model
 deliberately gave the last LP stage a lower design efficiency (see p. 6:
 *"due to the necessary adaptation of the LP turbine stage
 efficiency..."*), and the exergy analysis correctly flags exactly that
-stage as the cycle's biggest single irreversibility.
+stage as the cycle's biggest single irreversibility, both in raw exergy
+destroyed (1557 kW, the largest of any component) and in efficiency.
 
 ## PASS/FAIL
 
@@ -255,29 +259,11 @@ pump-parasitic shortfall are both disclosed, understood simplifications
 placeholder pump discharge pressure instead of a derived one) — not
 unexplained discrepancies.
 
-## What the TESPy run was for (not part of the comparison above)
+## Regenerating the plots
 
-`docs/benchmark/Tespy/SEGS_exergy-main` ships a TESPy model of the *same*
-plant with a genuine per-component exergy analysis (turbines, preheaters,
-condenser, cooling tower, drum, ...) — a natural cross-check target. It
-was installed and run this session (`tespy==0.9.3`, `CoolProp==6.8.0`,
-pinned per its own `requirements.txt`, in a `python3.11` venv — CoolProp
-has no wheel for this machine's default Python 3.14) to see whether it
-would reproduce its own README's checked-in results.
+`plot_results.py` re-runs the benchmark's own `build_network()`/`solve()`
+and writes both PNGs above:
 
-It didn't, in this environment: the network's `nw.solve(mode='design')`
-call itself fails to converge (`Detected singularity in Jacobian matrix`,
-`NaN` mass flow/pressure/enthalpy after 1–4 iterations, `Inputs in Brent
-[...] do not bracket the root` inside `CoolProp`'s water model), the same
-outcome across pandas 3.0/numpy 2.4 and a pandas 2.1/numpy 1.26/scipy
-1.11 downgrade. This looks like a genuine numerical-environment fragility
-in this specific `tespy==0.9.3` + CoolProp + arm64/macOS combination (or a
-missing initial-guess file/pin this repo's own `requirements.txt` doesn't
-capture), not a modeling error on either side — and per this benchmark's
-own scope, chasing it further wasn't worth it, since the actual comparison
-target is the *original 1995 paper*, not TESPy. The repo's own README
-ships a previously-computed, checked-in exergy table (from whatever
-environment the zenodo-archived model was actually run in), which remains
-a valid reference for anyone wanting a TESPy-side cross-check — just not
-one reproduced fresh in this session, and deliberately not reproduced
-in the comparison table above either, per what was asked for here.
+```bash
+python docs/benchmark/segs_exergy/plot_results.py
+```

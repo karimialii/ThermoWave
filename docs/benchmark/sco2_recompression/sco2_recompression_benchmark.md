@@ -18,22 +18,29 @@ is (c), and every published number quoted below is read from the paper's
 own **Table 5(c)** (stream data) and **Table 6(c)** (exergy results) —
 never Table 5(d)/6(d).
 
-This is the payoff of a capability assessment done earlier this session
-(against a third-party TESPy reproduction of this same paper). Four gaps
-were identified there; all four are exercised here:
+Reproducing this cycle exercises four ThermoWave capabilities together:
 
-| Gap | Where it's used |
+| Capability | Where it's used |
 |---|---|
-| #1 `Junction` free split fractions | The recompression splitter's mass-flow split |
-| #2 `Setpoint`/`Controller` live targets | The T-match constraint at the merge point |
-| #3 `core/exergy.py` | The E_F/E_P/E_D/epsilon comparison table below |
-| #4 entropy on ideal-gas fluids | Not directly (CO2 uses CoolProp, which already had entropy) — but the same session's work made `SteamTurbine`/`Pump`'s entropy-based physics the obvious, reliable choice for a real fluid this close to its critical point |
+| `Junction` free split fractions | The recompression splitter's mass-flow split |
+| `Setpoint`/`Controller` live targets | The T-match constraint at the merge point |
+| `core/exergy.py` | The E_F/E_P/E_D/epsilon comparison table below |
+| Entropy-based turbomachinery | CO2 uses CoolProp, which already provides entropy, but `SteamTurbine`/`Pump`'s entropy-based physics is what makes them the right choice this close to CO2's critical point (see "Why `Pump`/`SteamTurbine`" below) |
 
 Run it directly (needs the `coolprop` extra):
 
 ```bash
 pip install thermowave[coolprop]
-python docs/benchmark/sco2_recompression/sco2_recompression_benchmark.py
+python sco2_recompression_benchmark.py
+```
+
+The script itself lives at the repo root, not under `docs/`, and isn't
+tracked in git (it's gitignored — it will move into its own standalone
+repo later). The plots below are regenerated from its solved result via
+`plot_results.py`, which lives alongside this file:
+
+```bash
+python docs/benchmark/sco2_recompression/plot_results.py
 ```
 
 ## The cycle — paper's Figure 1(c), "Recompression, recuperated sCO2 cycle"
@@ -62,6 +69,21 @@ python docs/benchmark/sco2_recompression/sco2_recompression_benchmark.py
                                                                   Sink (-> heater in,
                                                                   external, node 3)
 ```
+
+**What this benchmark shows**: given design-point data derived once from
+the paper's own tables (see below), ThermoWave reproduces the cycle's
+component exergetic efficiencies to within about 2 points for the heat
+exchangers and 5 points for the turbomachinery — a gap that itself lines
+up almost exactly with the paper's own motor/generator/mechanical
+efficiency factors (Table 2), which ThermoWave's turbine/pump models
+deliberately don't include. The predicted heater-inlet temperature (c3)
+comes out 1.1% high, and the model's own free-split solve converges to a
+recompression fraction measurably different from the calibration value —
+both traced to a single, identified cause: a mean-temperature vs.
+inlet-temperature convention mismatch in how recuperator UA gets
+evaluated (see "A remaining, precisely-identified limitation" below).
+Nothing here is hand-waved — every number is either read straight from
+the paper's Table 5(c)/6(c) or produced by running the script.
 
 Node numbers (`1,2,3,4,5,6,10-15`) match the paper's Table 5(c) exactly —
 this is a 1:1 reproduction of the paper's own state-point labeling, not
@@ -179,7 +201,10 @@ known from the published Table 5(c) data.
 
 **Predicted c3** (the point the network doesn't force to close, only
 predicts): 441.4 °C vs. published 433.63 °C (Table 5(c)) — about 1.1%
-high in absolute temperature.
+high in absolute temperature. The same run shows where ThermoWave's own
+free-split solve lands relative to the derivation's calibration value:
+
+![Predicted vs. published c3 temperature, and the recompression-split discrepancy between ThermoWave's free-split solve and the derivation's calibration value](validation_summary.png)
 
 **A remaining, precisely-identified limitation**: even with a
 self-consistent mass flow, ThermoWave's own free-split solve converges to
@@ -198,7 +223,6 @@ give measurably different `Cmin`/`Cr`, and therefore a different
 sensitivity of the cold-outlet temperature to the mass-flow split — so
 the *same* UA reproduces the exact duty at the calibration split, but the
 Newton solve (searching for whatever split makes T11=T12 under the
-
 network's own, inlet-cp-based model) lands somewhere else. Resolving it
 would mean either calibrating UA against `MultiPassHeatExchanger`'s own
 inlet-cp convention directly, or iterating the derivation at the solved
@@ -207,6 +231,8 @@ derivation a single, auditable pass.
 
 **Component exergetic efficiency (epsilon = E_P/E_F)**, ThermoWave vs.
 the paper's own Table 6(c):
+
+![Bar chart comparing ThermoWave's and the published component exergetic efficiencies for turb, rec1, rec2, cp1, and cp2](exergy_comparison.png)
 
 ```
 component    TW eps  pub eps   delta  why
