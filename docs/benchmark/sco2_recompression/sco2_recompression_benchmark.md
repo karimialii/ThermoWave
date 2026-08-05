@@ -45,12 +45,13 @@ python docs/benchmark/sco2_recompression/plot_results.py
 
 ## The cycle — paper's Figure 1(c), "Recompression, recuperated sCO2 cycle"
 
+![Recompression sCO2 cycle schematic: heater, turbine, two recuperators, the recompression split, cooler, and both compressors, closing back on itself](cycle.svg)
+
 ```
                      ┌─────────────────────────── C-1b "cp2" (recompression) ──┐
                      │                                                          │
-  [4] 600C/250bar    │                                                          │
-   Source ──► T-1 "turb" ──► E-2b "rec2" hot ──► E-2a "rec1" hot ──► sp1 (free split)
-   (heater out)  [5]        [14]           [15]           node 15 = split point
+  Recycle ──► E-4 "heater" [4] 600C/250bar ──► T-1 "turb" ──► E-2b "rec2" hot ──► E-2a "rec1" hot ──► sp1 (free split)
+  (mdot anchor)  (external heat, T target)      [5]        [14]           [15]           node 15 = split point
                                                                      │
                     out0 (main branch, ~73% of flow)      out1 (recompression, ~27%)
                      │                                              │
@@ -66,8 +67,7 @@ python docs/benchmark/sco2_recompression/plot_results.py
                                             E-2a "rec1" ──► E-2b "rec2" cold [3]
                                             (cold in already used above)   │
                                                                             ▼
-                                                                  Sink (-> heater in,
-                                                                  external, node 3)
+                                                                  (back to Recycle)
 ```
 
 **What this benchmark shows**: given design-point data derived once from
@@ -96,7 +96,8 @@ shaft-power balancing the paper does internally isn't a constraint this
 network needs to reproduce.
 
 ```
-Source(c4: 600 C, 250 bar)
+Recycle (mdot=MDOT_TOTAL)
+  -> SimpleHeater "heater" (T_out=600 C, PR=P4/P3)                  [c4]
   -> SteamTurbine "turb" (eta_s=0.90, P_out=77.95 bar)              [c5]
   -> MultiPassHeatExchanger "rec2" hot side                        [c14]
   -> MultiPassHeatExchanger "rec1" hot side                        [c15]
@@ -106,27 +107,57 @@ Source(c4: 600 C, 250 bar)
        out1 -> Pump "cp2"                                          [c11]
   -> Junction "m1" (merge c12 + c11)                                [c13]
   -> MultiPassHeatExchanger "rec2" cold side                        [c3]
-  -> Sink
+  -> (back to Recycle)
 ```
 
-## Why the network doesn't literally close the loop
+## Why the network is a genuinely closed loop, and how the heater works
 
 The heater (c3 -> c4) and cooler (c15/c6 -> c1) are where the cycle crosses
 its system boundary — external heat in, external heat rejected. Both
 endpoints of each are fully specified in the published data (temperature
-*and* pressure), so there's nothing to solve there: they're boundary
-conditions, not physics. ThermoWave also structurally requires at least
-one `Source` fixing an absolute (P, h) reference — a literal closed loop
-with no boundary anywhere has no absolute anchor for the whole system.
+*and* pressure), so closing this loop doesn't require inventing anything:
+`SimpleHeater(T_out=600 C, PR=P4/P3)` reproduces exactly the same c4 target
+a `Source` used to assert directly, just as a genuine loop component fed
+from `rec2`'s own cold-side outlet instead of an external boundary value.
 
-So the network starts at a single `Source` (c4, the heater's *output* —
-600 °C, 250 bar) and ends at a `Sink` after `rec2`'s cold side (c3, the
-heater's *input*). The cooler's duty is precomputed once (see below) and
-applied via `Pipe(heat_loss=...)`, since its own endpoint temperatures are
-likewise externally fixed, not solved. What ThermoWave predicts for c3 is
-then compared against the published c3 (433.63 °C, Table 5(c)) as the
-actual validation target — the loop isn't forced closed, its closure is
-checked.
+`SimpleEvaporator` (the component the `segs_exergy` benchmark's own boiler
+uses for the same kind of crossing) doesn't work here: CO2 stays
+**supercritical** across this entire cycle (250 bar ≫ CO2's ~73.8 bar
+critical pressure), and `SimpleEvaporator`'s superheat/subcool/quality
+targeting is relative to a saturation curve that doesn't exist above the
+critical pressure. `SimpleHeater` (`thermowave.components.SimpleHeater`)
+targets an outlet *temperature* directly instead — see its own docs — which
+needs nothing from the saturation dome. `Pipe`'s existing `heat_loss`
+parameter was also considered and rejected: its default (`None` = zero
+loss) already carries meaning, colliding with the "`None` = free unknown"
+convention `Compressor`/`Junction` use elsewhere, and `SimpleHeater`'s
+target here is a directly-given constant anyway, not something needing a
+`Setpoint` indirection.
+
+`Recycle` (`thermowave.components.Recycle`) supplies the one thing
+`SimpleHeater` alone doesn't: an anchor for the loop's overall mass-flow
+scale (`MDOT_TOTAL`), the role `Source`'s `mdot=` used to play. Cold-start
+convergence for a network with no fixed `(P, h)` anywhere needs an explicit
+warm start (see `_warm_start()` in the script) — without one, every node
+defaults to the solver's flat guess, which for supercritical CO2 lands
+CoolProp's residual evaluation so far outside the cycle's real state space
+that Newton's first Jacobian evaluation fails before it can take a step.
+
+**A small, honest side effect of actually closing the loop:** the paper's
+own published c3/c4 pressures (257 bar / 250 bar, Table 5(c)) are rounded
+values, not exactly what the rest of the network's own chain of *relative*
+pressure ratios (turbine `P_out`, recuperator `PR`s, compressor `PR`s)
+independently produces for `rec2`'s cold-side outlet. A `Source` used to
+paper over that gap by asserting c4's pressure directly regardless of what
+came before it; a real closed loop can't — `heater.out`'s pressure is now
+`PR * (whatever rec2.cold_out's own chain of ratios actually solves to)`,
+which lands turbine inlet pressure about 0.2% away from the published
+250 bar. The effect on every reported number here is at the same ~0.2%
+level (e.g. turbine power 1.891e8 W vs. 1.888e8 W with the old
+`Source`-pinned topology) — well inside the gaps already discussed below,
+and, if anything, a more physically honest result: a real closed loop's
+absolute pressure has to be self-consistent all the way around, not
+asserted at one open end.
 
 ## Why `Pump`/`SteamTurbine`, not `SimpleCompressor`/`SimpleTurbine`
 
@@ -199,10 +230,11 @@ known from the published Table 5(c) data.
 
 ## Results
 
-**Predicted c3** (the point the network doesn't force to close, only
-predicts): 441.4 °C vs. published 433.63 °C (Table 5(c)) — about 1.1%
-high in absolute temperature. The same run shows where ThermoWave's own
-free-split solve lands relative to the derivation's calibration value:
+**Predicted c3** (`rec2`'s cold-side outlet, which now feeds `Recycle` ->
+`heater` to close the loop rather than terminating at a `Sink`): 441.2 °C
+vs. published 433.63 °C (Table 5(c)) — about 1.1% high in absolute
+temperature. The same run shows where ThermoWave's own free-split solve
+lands relative to the derivation's calibration value:
 
 ![Predicted vs. published c3 temperature, and the recompression-split discrepancy between ThermoWave's free-split solve and the derivation's calibration value](validation_summary.png)
 

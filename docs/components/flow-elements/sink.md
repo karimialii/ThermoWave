@@ -17,5 +17,9 @@ to ambient), and pairs with [`Source`](source.md)`(mdot=None)`: total mass
 flow becomes a Newton unknown, solved for as whatever value is
 self-consistent with every component's characteristic in between.
 
+**See also:** for a genuinely closed loop with no open boundary at all (a
+recirculating ORC/Rankine/Brayton cycle), see [`Recycle`](recycle.md)
+instead — it anchors mass flow without also fixing `(P, h)`.
+
 ---
 Part of [Flow elements](index.md).

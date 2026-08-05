@@ -1,9 +1,10 @@
 # Benchmark: 11 kWe ORC waste-heat-recovery rig
 
-`orc11kwe_benchmark.py` checks ThermoWave's `Source -> Pump -> SimpleEvaporator`
-chain against a published, instrumented 11 kWe organic Rankine cycle (ORC)
-test rig — R245fa working fluid, plate heat exchangers, screw expander at a
-fixed 5000 rpm — built and characterized under the ORCNext project.
+`orc11kwe_benchmark.py` checks ThermoWave's closed
+`Pump -> SimpleEvaporator -> SteamTurbine -> SimpleCondenser` loop against a
+published, instrumented 11 kWe organic Rankine cycle (ORC) test rig — R245fa
+working fluid, plate heat exchangers, screw expander at a fixed 5000 rpm —
+built and characterized under the ORCNext project.
 
 **Result:** at both ends of the rig's published operating envelope,
 ThermoWave's computed evaporator working-fluid duty lands well inside the
@@ -92,30 +93,49 @@ Therminol 66 correlation instead (see `therminol66_cp()` in the script,
 sourced from Eastman technical bulletin TF-8695) — a legitimate, citable
 number, just from a different public source than the ORC paper.
 
-The one genuinely *assumed* (neither published nor derived) number is the
-pump's isentropic efficiency, `PUMP_ETA_ASSUMED = 0.75`. It barely matters:
-pump work for a liquid is `dh ≈ v·dP / eta`, and across this cycle's
-pressure rise that's a few hundred J/kg against an evaporator duty of
-roughly 2×10⁵ J/kg — under 1% of the quantity actually being checked. It's
-included so the network models a physically complete pump-to-evaporator
-chain rather than silently skipping the pump, and it's called out here so
-nobody mistakes the pump's own efficiency as a validated figure.
+Two genuinely *assumed* (neither published nor derived) numbers appear:
+`PUMP_ETA_ASSUMED = 0.75` and `TURBINE_ETA_ASSUMED = 0.75`. The pump one
+barely matters: pump work for a liquid is `dh ≈ v·dP / eta`, and across
+this cycle's pressure rise that's a few hundred J/kg against an evaporator
+duty of roughly 2×10⁵ J/kg — under 1% of the quantity actually being
+checked. It's included so the network models a physically complete
+pump-to-evaporator chain rather than silently skipping the pump.
+
+`TURBINE_ETA_ASSUMED` exists for a different reason: it's what lets the
+cycle be wired as a genuinely closed loop (see below) rather than the open
+`Source`/`Sink` chain this benchmark used to stop at the evaporator outlet.
+It has **no effect** on the evaporator heat-balance check below — `Q_wf` is
+computed from the pump-inlet and evaporator-outlet states alone, exactly as
+before — but unlike the pump's efficiency, it *would* matter a great deal
+for a net-electrical-power check (turbine work dominates the cycle's power
+balance). No numeric net-power target is available from the paper excerpt
+used here (see above), so this benchmark doesn't attempt that comparison;
+neither assumed efficiency should be mistaken for a validated figure.
 
 ## The network
 
 ```
-Source(R245fa, P=p_cond, T=T_sat(p_cond) - 0.5 K, mdot=mdot_wf)
-    -> Pump(P_out=p_evap, eta=0.75)      # assumed, see above
+Pump(P_out=p_evap, eta=0.75)             # PUMP_ETA_ASSUMED, see above
     -> SimpleEvaporator(superheat=T_superheat)
-    -> Sink()
+    -> SteamTurbine(P_out=p_cond, eta_s=0.75)   # TURBINE_ETA_ASSUMED, see above
+    -> SimpleCondenser(subcool=0.5 K)
+    -> Recycle(mdot=mdot_wf)              # closes the loop back to Pump.in
+    -> (back to Pump)
 ```
 
-`Source` starts the working fluid as a (slightly, numerically) subcooled
-liquid at the condensing pressure — the state the fluid would be in
-leaving the condenser. The 0.5 K subcooling is purely a numerical-safety
-margin, keeping CoolProp on the unambiguous single-phase-liquid branch
-rather than exactly on the saturation dome; it is not a claim about the
-rig's actual subcooling, which isn't in the data used here.
+This is a genuinely closed loop — no `Source`, no `Sink`. `SimpleCondenser`
+computes its own outlet `(P, h)` from a 0.5 K subcool target (the same
+numerical-safety margin a `Source`-fixed pump-inlet temperature used to
+apply directly), so the pump-inlet state is a *solved consequence* of the
+condenser's own physics rather than an externally asserted boundary value.
+`Recycle` supplies the one thing that's still missing without a `Source`
+anywhere in the loop: an anchor for the working-fluid mass-flow rate's
+magnitude (see [`Recycle`](../../components/flow-elements/recycle.md)).
+Closing the loop this way reproduces the exact same evaporator-side
+numbers this benchmark reported before (`Q_wf` unchanged to the last
+digit) — the pump-inlet state was already physically equivalent to what
+the condenser now computes; the difference is that it's now a genuine
+model consequence instead of an assumption baked into `Source`'s own `T`.
 
 `Pump` raises the pressure to `p_evap` (`Pump` is entropy-based —
 `s_in = entropy_ph(...)`, `h_out_isentropic = enthalpy_ps(...)`, scaled by
@@ -170,11 +190,9 @@ rather than a plot) would unlock two things this script can't do yet:
    achieved *range*, not two specific tied-together readings — treating
    them as the two DOE corners is a reasonable but unverified assumption.
    A single logged data row would remove that assumption entirely.
-2. **A net-power check.** With a published (or back-calculated) expander
-   isentropic efficiency, the same network extended with
-   `thermowave.components.SteamTurbine` (the entropy-based, two-phase-
-   correct expander model — already used elsewhere in this repo, e.g. for
-   the Rotor 37 companion benchmark's Compressor discussion) and
-   `SimpleCondenser` would close the full cycle and let this benchmark
-   check net electrical power against the paper's claimed ±2%, not just
-   the evaporator heat balance.
+2. **A net-power check.** The network is now a genuinely closed loop
+   (`SteamTurbine` + `SimpleCondenser` + `Recycle`, see above) — the
+   topology needed for a net-power check already exists. What's still
+   missing is a published (or back-calculated) expander isentropic
+   efficiency to replace `TURBINE_ETA_ASSUMED` with, and a digitized
+   net-power target from the paper's Figures 5–9 to check against.

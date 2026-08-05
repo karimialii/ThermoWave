@@ -903,17 +903,21 @@ class Network:
         return problems
 
     def validate_topology(self) -> None:
-        if not self._fixed_node_values():
-            raise NetworkTopologyError(
-                "Network has no boundary component fixing node state (P, h). "
-                "Add a Source."
-            )
-        # No analogous check for mdot: a Source may legitimately leave it
-        # unfixed (mdot=None) so total mass flow is solved for instead,
-        # closed by some other residual elsewhere (e.g. a Sink pinning its
-        # inlet pressure) — Solver.solve()'s own square-system check (equal
-        # unknown/equation counts) is what actually catches a genuinely
-        # under- or over-constrained network, with a more specific message.
+        """No-op: kept as a stable call site for solve()/solve_transient()
+        rather than removed outright.
+
+        This used to hard-require a component fixing (P, h) somewhere (a
+        Source), which wrongly rejected a genuinely closed loop with no hard
+        P/h boundary at all -- e.g. a Rankine cycle closed by Recycle
+        (thermowave.components.recycle), where every node's (P, h) comes
+        from the other components' own physics/residuals instead of a
+        boundary condition. Solver.solve()'s own square-system check (equal
+        unknown/equation counts, further down in Solver.solve()) is the
+        actual gate for whether a network is solvable, and gives a more
+        specific diagnostic (via check_wiring()) than anything checkable
+        here ever could.
+        """
+        return None
 
     def solve(
         self,

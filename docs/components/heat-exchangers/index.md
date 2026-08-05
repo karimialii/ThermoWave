@@ -12,6 +12,7 @@ saturation properties (`CoolPropFluid`, the `coolprop` extra).
 heat-exchanger
 condenser
 evaporator
+heater
 drum
 tank
 ```
@@ -25,5 +26,6 @@ tank
 | [`SimpleCondenser`](condenser.md#simplecondenser-single-stream) | Single-stream: condenses to a spec outlet, coolant not modeled. |
 | [`Evaporator`](evaporator.md#evaporator-two-stream) | Two-stream: working fluid boils against an explicit heat-source stream. |
 | [`SimpleEvaporator`](evaporator.md#simpleevaporator-single-stream) | Single-stream: boils to a spec outlet, heat source not modeled. |
+| [`SimpleHeater`](heater.md) | Single-stream: heats to a target *temperature* (not saturation-relative), safe for supercritical fluids. |
 | [`Drum`](drum.md) | Steam drum — two-phase reservoir with liquid-level dynamics. |
 | [`Tank`](tank.md) | Constant-volume plenum with real mass/energy storage (single-phase). |

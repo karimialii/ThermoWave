@@ -10,6 +10,7 @@ and [Heat exchangers](../heat-exchangers/index.md) into a complete network.
 
 source
 sink
+recycle
 pipe
 valve
 check-valve
@@ -21,6 +22,7 @@ junction
 |---|---|
 | [`Source`](source.md) | Fixes outlet pressure, temperature, and (usually) mass flow — a network's inlet boundary. |
 | [`Sink`](sink.md) | Terminates a branch, optionally pinning exit pressure. |
+| [`Recycle`](recycle.md) | Anchors mass-flow scale in a closed loop with no open boundary. |
 | [`Pipe`](pipe.md) | Darcy-Weisbach friction pressure drop, with optional heat loss. |
 | [`Valve`](valve.md) | Flow-restriction pressure drop via a loss coefficient, isenthalpic. |
 | [`CheckValve`](check-valve.md) | One-way variant of `Valve` — stiff resistance against reverse flow. |

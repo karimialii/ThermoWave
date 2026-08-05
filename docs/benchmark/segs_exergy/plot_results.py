@@ -82,18 +82,8 @@ def main() -> None:
     plot_turbine_stage_power(c, result, OUT_DIR / "turbine_stage_power.png")
 
     # --- exergy report, same fuel/product definition as the main script ---
-    from segs_exergy_benchmark import WATER
-
-    C0 = 273.15
-    mdot_boiler = TURBINES["hpt1"][0]
-    h_boiler_in = WATER.enthalpy_pt(TURBINES["hpt1"][1] * 1.0e5, 371.0 + C0)
-    _, h_feed_ret = state.node("hpPreheater2_cold.out")
-    q_boiler_w = mdot_boiler * (h_boiler_in - h_feed_ret)
-
-    _, h_rh_in = state.node("sink_reheat_in.in")
-    q_reheat_w = TURBINES["lpt1"][0] * (
-        WATER.enthalpy_pt(TURBINES["lpt1"][1] * 1.0e5, 371.0 + C0) - h_rh_in
-    )
+    q_boiler_w = c["boiler"].report_metrics(state)["power [W]"]
+    q_reheat_w = c["reheater"].report_metrics(state)["power [W]"]
 
     gross_mech_w = sum(c[name].report_metrics(state)["power [W]"] for name in TURBINES)
 

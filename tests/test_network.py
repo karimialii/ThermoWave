@@ -150,11 +150,16 @@ def test_network_validate_topology_allows_no_mdot_source():
         network.solve()
 
 
-def test_network_validate_topology_raises_when_no_boundary_state():
+def test_network_validate_topology_is_a_noop_even_with_no_boundary_state():
+    # validate_topology() no longer hard-requires a Source: a genuinely
+    # closed loop (e.g. one closed by Recycle) may legitimately have no
+    # component fixing (P, h) anywhere. Solver.solve()'s own square-system
+    # check is what actually catches an under/over-constrained network like
+    # this bare, unconnected Pipe -- see test_network_e2e.py's
+    # test_network_without_source_raises_topology_error_on_solve.
     network = Network(fluid=AIR)
     network.add_component(Pipe(name="p1", L=5.0, D=0.2, f=0.02))
-    with pytest.raises(NetworkTopologyError, match="boundary"):
-        network.validate_topology()
+    network.validate_topology()  # must not raise
 
 
 def test_network_validate_topology_passes_for_simple_network():

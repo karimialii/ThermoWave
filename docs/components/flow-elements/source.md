@@ -18,5 +18,9 @@ pinning exit pressure). `mdot_guess` seeds that unknown's initial guess.
 **Residuals:** none — a `Source` only fixes values, it doesn't compute
 anything.
 
+**See also:** for a genuinely closed loop with no open boundary at all (a
+recirculating ORC/Rankine/Brayton cycle), see [`Recycle`](recycle.md)
+instead — it anchors mass flow without also fixing `(P, h)`.
+
 ---
 Part of [Flow elements](index.md).

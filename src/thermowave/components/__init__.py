@@ -37,6 +37,7 @@ from thermowave.components.nozzle import Nozzle
 from thermowave.components.pid_controller import PIDController
 from thermowave.components.pipe import Pipe
 from thermowave.components.pump import Pump
+from thermowave.components.recycle import Recycle
 from thermowave.components.schedule import Schedule
 from thermowave.components.sensor import Sensor
 from thermowave.components.setpoint import Setpoint
@@ -48,6 +49,7 @@ from thermowave.components.simple_condenser import SimpleCondenser
 from thermowave.components.simple_evaporator import SimpleEvaporator
 from thermowave.components.simple_generator import SimpleGenerator
 from thermowave.components.simple_heat_exchanger import SimpleHeatExchanger
+from thermowave.components.simple_heater import SimpleHeater
 from thermowave.components.simple_turbine import SimpleTurbine
 from thermowave.components.sink import Sink
 from thermowave.components.source import Source
@@ -77,6 +79,7 @@ __all__ = [
     "Pipe",
     "Pump",
     "Radiation",
+    "Recycle",
     "Schedule",
     "Sensor",
     "Setpoint",
@@ -88,6 +91,7 @@ __all__ = [
     "SimpleEvaporator",
     "SimpleGenerator",
     "SimpleHeatExchanger",
+    "SimpleHeater",
     "SimpleTurbine",
     "Sink",
     "Source",
