@@ -60,6 +60,13 @@ pip install -e ".[full]"       # everything, including dev/test tooling
   transient run seeded from steady. Includes the traps that cost real
   debugging time (where mechanical loss actually belongs, why more fuel can
   *lower* turbine outlet temperature, and the no-equilibrium fuel cliff).
+- [Closing a recycle/EGR composition loop](docs/tutorials/closing-a-recycle-composition-loop.md)
+  — why a `Recycle`-closed flow loop and a fluid-*composition* cycle through
+  it are different problems, and why the latter needs
+  `Recycle(fluid_guess=...)` plus the tear-stream iteration
+  `Network.solve()` runs to converge it. A worked, checkable example, and
+  two traps (an over-determined `Recycle` placement, and why composition
+  doesn't propagate through a second consecutive `Combustor` pass).
 
 ## Architecture
 
@@ -580,11 +587,31 @@ exists for — actually qualifies), it computes a genuine mass-weighted blend
 of their compositions. Anything else (fluids that don't expose that
 contract, or share it on different mechanisms) falls back to the first
 inlet's fluid — an explicit, documented simplification, not a silent
-guess. A recycle/EGR loop (composition depending on itself through a flow
-cycle) still isn't handled — the fixed-point loop only resolves a node once
-its inlet is already known, so a true cycle just never settles that node
-(it silently stays at the pass-through default instead); out of scope for
-now, unreachable by any example/test network here since nothing recycles.
+guess.
+
+A composition cycle (a node's fluid depending, through the flow graph, on
+itself) still can't resolve on its own: the fixed-point loop only ever
+writes a node once its inlet is already known, seeded solely from the
+network's own fixed `(P, h)` boundaries — a loop closed by `Recycle`
+(`src/thermowave/components/recycle.py`) fixes none of those, so a node
+whose composition depends on itself through it would otherwise silently
+fall back to the pass-through default instead of ever resolving.
+`Recycle(fluid_guess=<a BaseFluid>)` tears exactly that cycle open: it seeds
+its own outlet with a starting composition, and `Network.solve()` re-solves
+and refines that guess against what actually arrives back at the
+`Recycle`'s inlet — direct-substitution/"tear stream" iteration, the same
+technique real process simulators use for recycle convergence — until it
+self-consistently converges (`recycle_fluid_tol`/`recycle_fluid_max_iter`
+on `Network.solve()`; raises `ConvergenceError` if it doesn't). Leave
+`fluid_guess` unset (the default) for a loop with no composition-changing
+component in it (an ordinary Rankine/Brayton cycle) — that case needs none
+of this and is unaffected. See `tests/test_recycle_composition.py` for a
+worked example and its own note on a real EGR loop's remaining restriction:
+`Combustor.outlet_fluid()` only fires for an inlet that's literally a
+`CanteraFluid` instance, so composition doesn't propagate through a second
+consecutive composition-changing hop (a combustor's own recirculated
+product, or a `Junction` blend, feeding back into a combustor) — a separate,
+narrower gap than the cycle-propagation one this fixes.
 
 ## Two-phase components (evaporator / condenser / drum / Rankine)
 
@@ -642,11 +669,14 @@ outlet state, e.g. saturated vapor / a quality / N degrees of superheat, then
 
 A full Pump → boiler (superheat) → SteamTurbine → condenser cycle on water
 (reporting cycle efficiency and wet-steam turbine exhaust) can be built the
-same way as the other network examples above. It is an **open** chain (a
-Source pins the feedwater, a Sink terminates the exhaust) — the unrolled
-equivalent of the closed cycle, since the solver requires a fixed boundary
-node and true recycle loops are out of scope (see the fluid-propagation
-section above).
+same way as the other network examples above. Shown here as an **open**
+chain (a Source pins the feedwater, a Sink terminates the exhaust) for
+simplicity; a genuinely closed loop works too, closed by `Recycle`
+(`src/thermowave/components/recycle.py`) instead of a Source/Sink pair — see
+`tests/test_recycle.py` — the flow (P/h/mdot) side handles a real cycle fine
+either way. Only fluid *composition* self-reference through a closed
+loop needed its own mechanism (`Recycle(fluid_guess=...)`); see
+"Composition-aware fluid propagation" above.
 
 ## Roadmap
 
@@ -758,10 +788,12 @@ section above).
 - **Composition-aware fluid propagation — landed**, including real
   `Junction` mixing (a mass-weighted blend of two or more differently-
   composed inlets, gated on all of them exposing a common
-  `mass_fractions()`/`mechanism` contract). See its own section above for
-  the full mechanism. Still open: recycle/EGR loops — explicitly out of
-  scope for now (flagged in that section), unreachable by any example/test
-  network today since nothing recycles.
+  `mass_fractions()`/`mechanism` contract) and, since, `Recycle`-torn
+  composition cycles (`fluid_guess=`, see "Composition-aware fluid
+  propagation" above and the Roadmap's own "Recycle/EGR composition loops"
+  entry below). Still open: a real fully-reactive EGR loop needs
+  `Combustor.outlet_fluid()`'s `isinstance(CanteraFluid)` gate loosened too
+  (flagged in that section) — a second, narrower, separate gap.
 - **More components — landed.** `Tank` (constant-volume plenum with real
   mass/energy storage, see "Volume dynamics" above), `ElectricMotor`
   (electrically-driven mechanical power, the inverse of `SimpleGenerator`),
@@ -840,13 +872,23 @@ Where I'm taking this next, in roughly the order I plan to tackle it:
   enthalpy datum (e.g. a binary/organic-Rankine cascade) still needs
   separate `Network` instances rather than one connected graph — I'd like
   to close that gap.
-- **Recycle/EGR loops.** Explicitly out of scope for now (see
-  "Composition-aware fluid propagation" above) — the solver requires an
-  acyclic flow graph with a fixed boundary `Source`, so a stream whose
-  composition depends on itself through a closed loop has no
-  representation yet. This is the biggest lift on this list (it likely
-  needs the solver's own unknown-discovery pass to handle a genuine
-  fixed-point over composition, not just P/h/mdot), so it's planned last.
+- **Recycle/EGR composition loops — landed.** The P/h/mdot Newton solve
+  already handled a genuine flow cycle fine on its own (it's one flat,
+  simultaneous system with no graph-order dependence — see `Recycle`'s own
+  closed-Rankine-loop test); the only actually acyclic-only piece was fluid
+  *composition* propagation. `Recycle(fluid_guess=<a BaseFluid>)` now tears
+  a composition cycle open, and `Network.solve()` runs an outer direct-
+  substitution loop (`recycle_fluid_tol`/`recycle_fluid_max_iter`) until the
+  guess self-consistently matches what the rest of the loop actually sends
+  back to it. See "Composition-aware fluid propagation" above and
+  `tests/test_recycle_composition.py`. Still open, and narrower than
+  originally scoped: `Combustor.outlet_fluid()`'s own `isinstance(...,
+  CanteraFluid)` gate means composition doesn't propagate through a *second*
+  consecutive composition-changing hop, so a real fully-reactive EGR loop
+  (recirculated combustion products re-entering the same or another
+  combustor) needs that gate loosened to the same duck-typed
+  `mass_fractions()`/`mechanism` contract `Junction` already uses — a
+  smaller, separate follow-up.
 - **CI — landed.** `pytest`, `ruff check`, and `mypy` (the last
   non-blocking until the pre-existing type debt is paid down) run on every
   push and pull request against Python 3.10/3.11/3.12

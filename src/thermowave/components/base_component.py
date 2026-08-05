@@ -83,6 +83,20 @@ class BaseComponent(ABC):
         """node_name -> mass flow rate [kg/s] this component fixes as a boundary condition."""
         return {}
 
+    def fluid_seed(self) -> dict[str, "BaseFluid"]:
+        """node_name -> BaseFluid to seed Network._resolve_node_fluid()'s
+        composition fixed-point pass with, beyond the network's own fixed
+        (P, h) boundaries (Source, etc.). Default: no extra seeds.
+
+        Override when a component supplies a fluid guess at a node with no
+        other inbound composition edge — the only existing case is Recycle
+        tearing a composition cycle open (see Recycle.fluid_guess): a loop
+        closed by Recycle fixes no (P, h) at all, so it contributes nothing
+        to the network's ordinary seed set, and a node whose composition
+        depends on itself through that loop would otherwise never resolve.
+        """
+        return {}
+
     def guess_node_mdot(self) -> dict[str, float]:
         """node_name -> initial-guess mass flow rate [kg/s], for nodes this
         component leaves free (not in fixed_node_mdot()) rather than fixes.

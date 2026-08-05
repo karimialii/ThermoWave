@@ -1,16 +1,29 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Union
+from typing import TYPE_CHECKING, Callable, Protocol, Union, runtime_checkable
 
 import networkx as nx
 
-from thermowave.core.exceptions import NetworkTopologyError
+from thermowave.core.exceptions import ConvergenceError, NetworkTopologyError
 
 if TYPE_CHECKING:
     from thermowave.components.base_component import BaseComponent
     from thermowave.core.solver import SolveResult
     from thermowave.core.transient import TransientResult
     from thermowave.fluids.base_fluid import BaseFluid
+
+
+@runtime_checkable
+class _RecycleFluidTear(Protocol):
+    """Structural type for a component tearing a fluid-composition cycle
+    open, matched via isinstance() (Protocol + runtime_checkable) rather
+    than hasattr() so this stays real duck typing -- any future component
+    implementing both methods qualifies, same as Recycle does today -- while
+    still giving Network.solve()'s outer loop (see below) a properly typed
+    list instead of plain BaseComponent."""
+
+    def recycle_fluid_delta(self, state: "NetworkState") -> "float | None": ...
+    def update_fluid_guess(self, state: "NetworkState") -> None: ...
 
 # Connection kinds this Network can wire. "flow" merges two ports into one
 # shared (P, h, mdot) node; "mechanical" merges two ports into one shared
@@ -707,6 +720,16 @@ class Network:
             return {raw: fluid for raw, _canon in plan.export}
 
         canon_fluid: dict[str, "BaseFluid"] = dict.fromkeys(plan.seed_canon, self.fluid)
+        # Extra seeds beyond the network's own fixed (P, h) boundaries --
+        # only Recycle uses this today, to tear a composition cycle open at
+        # its outlet node with a guess that gets refined across outer
+        # solve() iterations (see Network.solve()). Read fresh every call,
+        # not cached on the plan, since a guess mutates between iterations
+        # while topology doesn't; cost is O(components), same class as the
+        # loop below.
+        for component in self.components:
+            for port_id, fluid in component.fluid_seed().items():
+                canon_fluid[self._canonical(port_id)] = fluid
         # The fixed point is reached as soon as a full pass adds nothing new:
         # both write paths are first-wins (setdefault / the "already known"
         # guard), and `state` is constant across the call, so an unproductive
@@ -931,6 +954,8 @@ class Network:
         warm_start: "SolveResult | None" = None,
         jacobian_reuse: int | None = None,
         step_growth: float | None = None,
+        recycle_fluid_tol: float = 1e-4,
+        recycle_fluid_max_iter: int = 25,
     ) -> "SolveResult":
         """dt/prev_diff_values are advanced/internal — see Solver.solve()
         and BaseComponent.differential_parameters(). Ordinary steady-state
@@ -957,14 +982,67 @@ class Network:
         real-gas network (chemical equilibrium + coupled PID control) that
         plain fixed damping handles fine. Only pass step_growth > 1.0 for a
         network you've specifically verified still converges correctly with
-        it enabled — it is not a safe-by-default speed knob."""
+        it enabled — it is not a safe-by-default speed knob.
+
+        recycle_fluid_tol/recycle_fluid_max_iter: only relevant when this
+        network contains a Recycle with fluid_guess= set (see recycle.py) --
+        i.e. a fluid-*composition* cycle (an EGR-style loop where a
+        Combustor's own inlet is fed, via a Junction, by its own recirculated
+        exhaust) torn open at that Recycle. Every other network takes the
+        exact same single-call path as before these arguments existed.
+
+        When there is such a Recycle, one ordinary Solver.solve() call isn't
+        enough on its own: Network._resolve_node_fluid()'s composition
+        fixed-point pass only ever forward-propagates from the network's own
+        fixed (P, h) boundaries, and a Recycle-closed loop fixes none of
+        those, so the very first solve only sees whatever composition
+        fluid_guess started at. This runs the ordinary P/h/mdot solve (which
+        already handles the *flow* cycle fine on its own -- see Recycle's own
+        docstring), then compares what actually arrived at the Recycle's
+        inlet against its current guess (Recycle.recycle_fluid_delta(),
+        mass-fraction basis) and, if they disagree by more than
+        recycle_fluid_tol, updates the guess (Recycle.update_fluid_guess())
+        and re-solves -- direct-substitution/"tear stream" iteration, the
+        standard technique process simulators use for recycle convergence.
+        Raises ConvergenceError if composition hasn't settled within
+        recycle_fluid_max_iter outer passes."""
         self.validate_topology()
         from thermowave.core.solver import Solver
 
-        return Solver(self).solve(
-            tol=tol, max_iter=max_iter, damping=damping, verbose=verbose, progress=progress,
-            dt=dt, prev_diff_values=prev_diff_values, warm_start=warm_start,
-            jacobian_reuse=jacobian_reuse, step_growth=step_growth,
+        recyclers: list[_RecycleFluidTear] = [
+            c for c in self.components if isinstance(c, _RecycleFluidTear)
+        ]
+        if not recyclers:
+            return Solver(self).solve(
+                tol=tol, max_iter=max_iter, damping=damping, verbose=verbose,
+                progress=progress, dt=dt, prev_diff_values=prev_diff_values,
+                warm_start=warm_start, jacobian_reuse=jacobian_reuse,
+                step_growth=step_growth,
+            )
+
+        result: "SolveResult | None" = None
+        deltas: list[float] = []
+        for _ in range(recycle_fluid_max_iter):
+            result = Solver(self).solve(
+                tol=tol, max_iter=max_iter, damping=damping, verbose=verbose,
+                progress=progress, dt=dt, prev_diff_values=prev_diff_values,
+                warm_start=warm_start, jacobian_reuse=jacobian_reuse,
+                step_growth=step_growth,
+            )
+            state = result.state()
+            deltas = [
+                d for c in recyclers
+                if (d := c.recycle_fluid_delta(state)) is not None
+            ]
+            if not deltas or max(deltas) < recycle_fluid_tol:
+                return result
+            for c in recyclers:
+                c.update_fluid_guess(state)
+            warm_start = result
+
+        raise ConvergenceError(
+            f"Recycle fluid composition did not converge in {recycle_fluid_max_iter} "
+            f"outer iterations (max mass-fraction delta={max(deltas):.2e})"
         )
 
     def solve_transient(

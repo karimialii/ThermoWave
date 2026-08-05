@@ -37,5 +37,37 @@ net.connect(recycle, "out", pump, "in")
 Use [`Source`](source.md)/[`Sink`](sink.md) for an open system with a real
 inlet/exhaust boundary; use `Recycle` for a working fluid that recirculates.
 
+## Composition cycles (EGR-style loops)
+
+The flow (`P`/`h`/`mdot`) side above is handled by the ordinary Newton
+solve regardless of whether the graph has a cycle in it. Fluid
+**composition** is resolved by a separate pass that only ever propagates
+forward from the network's fixed `(P, h)` boundaries — and a `Recycle`-closed
+loop fixes none of those, so a node whose composition depends on itself
+through the loop (a recirculated [`Combustor`](../combustion/combustor.md)
+exhaust, a [`Junction`](junction.md) blend feeding back on itself) would
+otherwise never resolve, silently falling back to the network's plain
+default fluid.
+
+`Recycle(fluid_guess=<a BaseFluid>)` seeds that pass with a starting
+composition at its own outlet. `Network.solve()` then re-solves and
+compares what actually arrives back at this component's inlet against the
+guess (`recycle_fluid_delta()`), updates it (`update_fluid_guess()`), and
+re-solves again — direct-substitution ("tear stream") iteration — until they
+agree within `recycle_fluid_tol` (default `1e-4`), or raises
+`ConvergenceError` after `recycle_fluid_max_iter` outer passes (default
+`25`):
+
+```python
+recycle = Recycle(name="recycle", mdot=1.0, fluid_guess=some_fluid)
+result = network.solve(recycle_fluid_tol=1e-6, recycle_fluid_max_iter=30)
+```
+
+Leave `fluid_guess` unset (the default) for a loop with no
+composition-changing component in it — the ordinary Rankine/Brayton case
+above needs none of this. See the
+[recycle/EGR composition loop tutorial](../../tutorials/closing-a-recycle-composition-loop.md)
+for a full worked example and its two traps.
+
 ---
 Part of [Flow elements](index.md).

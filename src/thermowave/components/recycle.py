@@ -6,6 +6,7 @@ from thermowave.components.base_component import BaseComponent
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
+    from thermowave.fluids.base_fluid import BaseFluid
 
 
 class Recycle(BaseComponent):
@@ -42,13 +43,37 @@ class Recycle(BaseComponent):
     fixed_node_mdot() already fixes this component's own outlet mdot
     directly -- adding a mass residual on top of that would try to pin the
     same already-fixed unknown with a second equation.
+
+    Composition (EGR-style loops): pass fluid_guess=<a BaseFluid> to also
+    tear a fluid-*composition* cycle open here, not just the flow cycle.
+    Network._resolve_node_fluid() only ever forward-propagates composition
+    from the network's own fixed (P, h) boundaries (Source, etc.) -- a loop
+    closed by Recycle fixes none of those, so without a guess a node whose
+    composition depends on itself through the loop (e.g. a Combustor whose
+    inlet is fed, via a Junction, by its own recirculated exhaust) would
+    silently fall back to the network's plain default fluid instead of ever
+    resolving. fluid_guess seeds this component's outlet with a starting
+    composition; Network.solve() then re-solves and refines that guess
+    against what actually arrives back at this component's inlet (direct-
+    substitution / "tear stream" iteration, the standard technique process
+    simulators use for recycle convergence) until it self-consistently
+    converges (see Network.solve()'s recycle_fluid_tol/recycle_fluid_max_iter).
+    Leave fluid_guess unset (the default) for a loop with no composition-
+    changing component in it (e.g. a plain Rankine/Brayton cycle) -- that
+    case needs none of this and behaves exactly as before.
     """
 
-    def __init__(self, name: str, mdot: float):
+    def __init__(
+        self,
+        name: str,
+        mdot: float,
+        fluid_guess: "BaseFluid | None" = None,
+    ):
         if mdot <= 0.0:
             raise ValueError(f"Recycle {name!r}: mdot must be > 0, got {mdot}")
         self.name = name
         self.mdot = mdot
+        self._fluid_guess = fluid_guess
         self._inlet_node = f"{name}.in"
         self._outlet_node = f"{name}.out"
 
@@ -62,3 +87,42 @@ class Recycle(BaseComponent):
 
     def fixed_node_mdot(self) -> dict[str, float]:
         return {self._outlet_node: self.mdot}
+
+    def fluid_seed(self) -> dict[str, "BaseFluid"]:
+        if self._fluid_guess is None:
+            return {}
+        return {self._outlet_node: self._fluid_guess}
+
+    def recycle_fluid_delta(self, state: "NetworkState") -> float | None:
+        """Max absolute per-species mass-fraction difference between the
+        current guess (seeded at this component's outlet) and what actually
+        propagated back around the loop to this component's inlet -- the
+        tear-stream convergence check Network.solve()'s outer loop uses.
+
+        None means "nothing to check": either fluid_guess isn't set (this
+        Recycle isn't tearing a composition cycle at all), or the resolved
+        fluids don't expose mass_fractions() (same duck-typed contract
+        Junction._all_blendable() checks -- nothing comparable, so treated
+        as trivially converged rather than guessed at, same precedent
+        Junction.merge_fluids() itself follows).
+        """
+        if self._fluid_guess is None:
+            return None
+        actual = state.fluid_at(self._inlet_node)
+        guess = self._fluid_guess
+        if not (hasattr(guess, "mass_fractions") and hasattr(actual, "mass_fractions")):
+            return None
+        guess_Y = guess.mass_fractions()
+        actual_Y = actual.mass_fractions()
+        species = set(guess_Y) | set(actual_Y)
+        if not species:
+            return None
+        return max(abs(actual_Y.get(s, 0.0) - guess_Y.get(s, 0.0)) for s in species)
+
+    def update_fluid_guess(self, state: "NetworkState") -> None:
+        """Replace the guess with what actually arrived at this component's
+        inlet this outer iteration -- Network.solve()'s direct-substitution
+        step for the next pass. No-op if fluid_guess was never set."""
+        if self._fluid_guess is None:
+            return
+        self._fluid_guess = state.fluid_at(self._inlet_node)

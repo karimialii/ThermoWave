@@ -9,6 +9,7 @@ is.
 
 building-a-gas-turbine-model
 building-a-combustion-chamber-model
+closing-a-recycle-composition-loop
 ```
 
 - **[Building a gas-turbine model](building-a-gas-turbine-model.md)** — a
@@ -29,6 +30,15 @@ building-a-combustion-chamber-model
   annulus diameter that looks like a convergence failure, why `Junction`
   doesn't reconcile mismatched branch pressures, and why the liner runs far
   hotter than a real metal survives without film cooling.
+- **[Closing a recycle/EGR composition loop](closing-a-recycle-composition-loop.md)**
+  — why a `Recycle`-closed flow loop and a *composition* cycle through that
+  same loop are two different problems, and why the second one needs
+  `Recycle(fluid_guess=...)`. Covers the tear-stream (direct-substitution)
+  iteration `Network.solve()` runs to converge it, a worked fresh-air/
+  recirculated-stream `Junction` example with a checkable analytic answer,
+  and two traps: wiring `Recycle` directly across a component with a forced
+  `(P, h)` change (over-determined, never converges), and why composition
+  doesn't propagate through a second consecutive `Combustor` pass.
 
 Looking for shorter, single-purpose snippets instead? See
 [Examples](../examples/index.md). For what each component actually computes,

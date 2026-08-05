@@ -95,3 +95,82 @@ def test_closed_rankine_loop_with_no_source_or_sink_converges():
 
     # Closed-cycle energy balance: heat in - heat out == net shaft work out.
     assert (q_evap - q_cond) == pytest.approx(turb_power - pump_power, rel=1e-6)
+
+
+class _FakeCompositionFluid:
+    """Minimal stand-in exposing just the mass_fractions() duck-type
+    Recycle.recycle_fluid_delta() relies on -- no need for a real
+    CoolProp/Cantera fluid to unit-test the tear-stream bookkeeping itself."""
+
+    def __init__(self, Y):
+        self._Y = Y
+
+    def mass_fractions(self):
+        return dict(self._Y)
+
+
+class _NoCompositionFluid:
+    """A fluid exposing no mass_fractions() at all -- the "nothing
+    comparable" case recycle_fluid_delta() must fall back on."""
+
+
+class _FakeFluidState:
+    def __init__(self, fluid_at_map):
+        self._map = fluid_at_map
+
+    def fluid_at(self, name):
+        return self._map[name]
+
+
+def test_fluid_seed_empty_without_guess():
+    rc = Recycle(name="rc", mdot=1.0)
+    assert rc.fluid_seed() == {}
+
+
+def test_fluid_seed_returns_guess_at_outlet_node():
+    guess = _FakeCompositionFluid({"N2": 1.0})
+    rc = Recycle(name="rc", mdot=1.0, fluid_guess=guess)
+    assert rc.fluid_seed() == {"rc.out": guess}
+
+
+def test_recycle_fluid_delta_none_without_guess():
+    rc = Recycle(name="rc", mdot=1.0)
+    state = _FakeFluidState({"rc.in": _FakeCompositionFluid({"N2": 1.0})})
+    assert rc.recycle_fluid_delta(state) is None
+
+
+def test_recycle_fluid_delta_none_when_not_comparable():
+    rc = Recycle(name="rc", mdot=1.0, fluid_guess=_NoCompositionFluid())
+    state = _FakeFluidState({"rc.in": _NoCompositionFluid()})
+    assert rc.recycle_fluid_delta(state) is None
+
+
+def test_recycle_fluid_delta_is_max_mass_fraction_gap():
+    guess = _FakeCompositionFluid({"N2": 0.79, "O2": 0.21})
+    actual = _FakeCompositionFluid({"N2": 0.70, "O2": 0.21, "CO2": 0.09})
+    rc = Recycle(name="rc", mdot=1.0, fluid_guess=guess)
+    state = _FakeFluidState({"rc.in": actual})
+    assert rc.recycle_fluid_delta(state) == pytest.approx(0.09)
+
+
+def test_recycle_fluid_delta_zero_when_guess_already_matches():
+    fluid = _FakeCompositionFluid({"N2": 0.79, "O2": 0.21})
+    rc = Recycle(name="rc", mdot=1.0, fluid_guess=fluid)
+    state = _FakeFluidState({"rc.in": fluid})
+    assert rc.recycle_fluid_delta(state) == pytest.approx(0.0)
+
+
+def test_update_fluid_guess_replaces_guess_with_inlet_fluid():
+    guess = _FakeCompositionFluid({"N2": 1.0})
+    actual = _FakeCompositionFluid({"CO2": 1.0})
+    rc = Recycle(name="rc", mdot=1.0, fluid_guess=guess)
+    state = _FakeFluidState({"rc.in": actual})
+    rc.update_fluid_guess(state)
+    assert rc._fluid_guess is actual
+
+
+def test_update_fluid_guess_is_noop_without_guess():
+    rc = Recycle(name="rc", mdot=1.0)
+    state = _FakeFluidState({"rc.in": _FakeCompositionFluid({"N2": 1.0})})
+    rc.update_fluid_guess(state)
+    assert rc._fluid_guess is None
