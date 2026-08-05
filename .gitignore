@@ -10,6 +10,7 @@ dist/
 /assets/
 /examples/
 /tutorials/
+docs/superpowers/
 
 # benchmark simulation scripts live at repo root for now (each one is
 # destined to become its own standalone repository) -- not tracked here
