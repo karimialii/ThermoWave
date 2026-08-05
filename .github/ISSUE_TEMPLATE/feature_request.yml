@@ -1,0 +1,42 @@
+name: Feature request
+description: A new component, solver capability, or other enhancement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. See the README's
+        [Roadmap](../../README.md#roadmap) and
+        [Future development](../../README.md#future-development) sections
+        first — it may already be planned, or the scope boundary may already
+        be documented there.
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: >
+        What are you trying to model, and what's stopping you today? A
+        concrete system (a cycle, a component, a physical effect) is more
+        useful than an abstract description.
+      placeholder: |
+        I'm modeling a binary/organic-Rankine cascade and need two genuinely
+        independent working fluids in one connected Network...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach (optional)
+      description: >
+        If you have a sense of how this would fit the existing architecture
+        (a new component implementing BaseComponent, a new BaseFluid hook, a
+        solver change), sketch it here. See "Writing a new component" in the
+        README for the residual-contribution pattern components follow.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you've tried
+      description: What are you doing today instead, and why isn't it enough?

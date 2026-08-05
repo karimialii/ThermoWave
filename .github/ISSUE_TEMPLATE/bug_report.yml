@@ -1,0 +1,80 @@
+name: Bug report
+description: Something in the solver, a component, or the docs isn't behaving correctly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. A minimal reproducing
+        network (component wiring + parameters) is the single most useful
+        thing you can include — see [CONTRIBUTING.md](../../CONTRIBUTING.md#reporting-bugs--requesting-features).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you get instead?
+      placeholder: |
+        I expected the network to converge to X, but it raised ConvergenceError / converged to a physically wrong state / etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproducing network
+      description: >
+        The smallest network (components, connections, parameters) that
+        reproduces the problem. Trim anything not needed to trigger it.
+      render: python
+      placeholder: |
+        from thermowave.core.network import Network
+        from thermowave.fluids.ideal_gas import IdealGasFluid
+        from thermowave.components import Source, Pipe, Sink
+
+        air = IdealGasFluid(name="air", R=287.05, cp=1005.0)
+        net = Network(fluid=air)
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error output / traceback
+      description: Full traceback if there is one, or the wrong values you're seeing.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: ThermoWave version
+      description: "`pip show thermowave` or the commit hash if installed from source."
+      placeholder: "0.8.2, or commit abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: "3.11.6"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: extras
+    attributes:
+      label: Optional extras installed
+      multiple: true
+      options:
+        - coolprop
+        - cantera
+        - plot
+        - none of these
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Platform, related issues, things you already ruled out, etc.
