@@ -58,6 +58,7 @@ def test_coolprop_fluid_raises_instead_of_silently_clamping_pressure():
     Newton trial that transiently drives a node below P_min currently gets
     plausible-looking but *wrong* density back with no error at all.
     """
+    pytest.importorskip("CoolProp")
     water = CoolPropFluid(name="Water", P_min=1.0e5, P_max=1.0e8)
     h = 500_000.0  # J/kg, arbitrary liquid-water enthalpy
 
@@ -71,6 +72,7 @@ def test_coolprop_fluid_accepts_pressure_at_range_boundary():
     """P_min/P_max themselves are still valid, inclusive boundary values --
     only P strictly outside [P_min, P_max] should raise.
     """
+    pytest.importorskip("CoolProp")
     water = CoolPropFluid(name="Water", P_min=1.0e5, P_max=1.0e7)
     h = 500_000.0
     water.density_ph(1.0e5, h)  # should not raise
