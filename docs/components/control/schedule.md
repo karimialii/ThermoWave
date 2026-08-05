@@ -1,6 +1,6 @@
 # Schedule
 
-<img src="../../_static/diagrams/schedule.svg" alt="Schedule diagram" style="max-width:100%">
+<img src="../../_static/diagrams/schedule.svg" alt="Schedule diagram" class="component-diagram">
 
 Drives a plain attribute on some other object (typically a
 [`Controller`](controller.md)/[`PIDController`](pid-controller.md)'s

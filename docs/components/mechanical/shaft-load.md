@@ -1,10 +1,10 @@
 # ShaftLoad
 
-<img src="../../_static/diagrams/shaft_load.svg" alt="ShaftLoad diagram" style="max-width:100%">
+<img src="../../_static/diagrams/shaft_load.svg" alt="ShaftLoad diagram" class="component-diagram">
 
 A constant-power mechanical load on a [`Shaft`](shaft.md) — the electrical
 demand a generator (plus power electronics) actually places on the rotor.
-Unlike [`SimpleGenerator`](simple-generator.md)/[`Generator`](generator.md)
+Unlike [`SimpleGenerator`](generator.md#simplegenerator-fixed-efficiency)/[`Generator`](generator.md#generator-torque-map)
 (passive readers that only *report* power), `ShaftLoad` is a genuine torque
 on the shaft: its demanded power enters the shaft power balance directly,
 so the equilibrium speed becomes wherever turbine power covers compressor

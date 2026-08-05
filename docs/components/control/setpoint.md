@@ -1,6 +1,6 @@
 # Setpoint
 
-<img src="../../_static/diagrams/setpoint.svg" alt="Setpoint diagram" style="max-width:100%">
+<img src="../../_static/diagrams/setpoint.svg" alt="Setpoint diagram" class="component-diagram">
 
 Drives one of a component's own `report_metrics()` outputs to a target
 value, by leaning on a free parameter that component already declared.

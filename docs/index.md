@@ -1,3 +1,5 @@
+<img src="_static/logo.png" alt="ThermoWave logo" width="160">
+
 # ThermoWave
 
 **ThermoWave** is a headless, 1D implicit thermodynamic network solver for

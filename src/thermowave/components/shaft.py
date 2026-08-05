@@ -7,9 +7,19 @@ from typing import TYPE_CHECKING
 from thermowave.components.base_component import BaseComponent
 
 if TYPE_CHECKING:
-    from thermowave.core.network import NetworkState
+    from thermowave.core.network import Network, NetworkState
 
 _RAD_PER_MIN_TO_RPM = 60.0 / (2.0 * math.pi)
+
+_MIN_OMEGA = 1.0e-3  # rad/s, floor for the torque = net_power / omega
+# division in state_derivative below -- omega <= 0 (standstill, a real
+# startup/shutdown state) would otherwise force torque to exactly zero
+# even when net_power is nonzero, so a shaft that ever reaches standstill
+# could never re-accelerate. Flooring instead gives a very large but
+# finite torque near zero speed, letting the shaft spin up from rest --
+# an unavoidable side effect of this model exchanging power (not torque)
+# between components: P = T*omega is genuinely singular at omega=0, so
+# there is no floor-free fix within this power-coupled formulation.
 
 
 class Shaft(BaseComponent):
@@ -23,20 +33,24 @@ class Shaft(BaseComponent):
     unknown — e.g. Turbine/Compressor, whether N is given or left free), and
     one signal port ("p0", "p1", ...) per member in `members` order (every
     member, including a torque-only one like ShaftLoad, since power still
-    needs to reach the balance). The caller wires both explicitly after
-    add_component():
+    needs to reach the balance).
 
-        shaft = Shaft("sh1", members=[turb, comp, load], signs=[1.0, -1.0, -1.0])
+    Connecting a member's mechanical "shaft" port automatically pulls its
+    "power" signal port in too (see on_connected() below) — a real shaft
+    doesn't have a separate wire for power either, so one connect() call
+    per speed-tied member is all that's needed:
+
+        shaft = Shaft("sh1", members=[turb, comp, load])  # signs inferred: [+1, -1, -1]
         network.add_component(shaft)
         network.connect(shaft, "m0", turb, "shaft", kind="mechanical")
         network.connect(shaft, "m1", comp, "shaft", kind="mechanical")
-        network.connect(shaft, "p0", turb, "power", kind="signal")
-        network.connect(shaft, "p1", comp, "power", kind="signal")
         network.connect(shaft, "p2", load, "power", kind="signal")
 
-    ShaftLoad has no "shaft" mechanical port (no speed unknown of its own —
-    a pure torque contribution), so it gets no mechanical port here, only a
-    signal one.
+    load still needs its own explicit signal connect: ShaftLoad has no
+    "shaft" mechanical port (no speed unknown of its own — a pure torque
+    contribution), so there's no mechanical connect() for it to piggyback
+    on. shaft.autowire(network) makes all three of these calls (including
+    load's) for you — see its own docstring.
 
     Two modes, chosen by dynamic:
 
@@ -89,11 +103,21 @@ class Shaft(BaseComponent):
     balance on the fluid side, so there's no separate path for lost power
     to go if efficiency were mixed into the coupling equation itself.
     Instead it scales the net shaft power reported by this component (and,
-    in dynamic mode, the torque driving the speed integration): pass signs
-    (default all +1.0) to mark which members deliver power to the shaft
-    (e.g. a turbine: +1.0) vs draw from it (e.g. a compressor: -1.0), and
-    report_metrics()["power [W]"] becomes
-    efficiency * sum(sign_i * member_i power).
+    in dynamic mode, the torque driving the speed integration): signs marks
+    which members deliver power to the shaft (e.g. a turbine: +1.0) vs draw
+    from it (e.g. a compressor: -1.0), and report_metrics()["power [W]"]
+    becomes efficiency * sum(sign_i * member_i power).
+
+    Leave signs at its default (None) to infer it from each member's own
+    BaseComponent.shaft_sign() — already a fixed, correct answer for every
+    built-in rotating/electrical component here (Turbine/ElectricMotor:
+    +1.0, Compressor/Generator/SimpleGenerator/ShaftLoad: -1.0), since it's
+    already baked into how each class computes its own power. Pass signs
+    explicitly only to override that for a genuine edge case (a motor
+    running in regenerative/generator mode, a compressor being
+    back-driven) or for a member type with no default (shaft_sign()
+    returns None) — Shaft raises a clear error naming exactly which
+    member(s) need one, rather than silently guessing.
     """
 
     def __init__(
@@ -130,7 +154,16 @@ class Shaft(BaseComponent):
                 f"({n_ratios}), got {len(gear_ratios)}"
             )
         if signs is None:
-            signs = [1.0] * len(members)
+            member_signs = [m.shaft_sign() for m in members]
+            unresolved = [m.name for m, s in zip(members, member_signs) if s is None]
+            if unresolved:
+                raise ValueError(
+                    f"Shaft {name!r}: can't infer signs for {unresolved} (no default "
+                    f"shaft_sign() on that component type) — pass signs=[...] "
+                    f"explicitly, one entry per member in "
+                    f"{[m.name for m in members]} order."
+                )
+            signs = [s for s in member_signs if s is not None]
         if len(signs) != len(members):
             raise ValueError(
                 f"Shaft {name!r}: signs must have one entry per member "
@@ -164,6 +197,73 @@ class Shaft(BaseComponent):
         self.N0 = N0
         self._mech_ports = {f"m{i}": f"{name}.m{i}" for i in range(len(speed_tied))}
         self._signal_port_names = {f"p{i}": f"{name}.p{i}" for i in range(len(members))}
+        self._power_port_for_member = {member: f"p{i}" for i, member in enumerate(members)}
+
+    def on_connected(
+        self,
+        port_name: str,
+        kind: str,
+        other: BaseComponent,
+        other_port: str,
+        network: "Network",
+    ) -> None:
+        """Connecting a member's "shaft" mechanical port to one of this
+        Shaft's own m{i} ports automatically pulls that same member's
+        "power" signal port along with it, wired to the matching p{i} — on
+        a real shaft, speed and power aren't a separate physical
+        connection either, so a Turbine/Compressor/Generator/... needs
+        exactly one network.connect(..., kind="mechanical") call to be
+        fully wired here, not a second one for power:
+
+            network.connect(shaft, "m0", turb, "shaft", kind="mechanical")
+            # shaft's "p0" <-> turb's "power" is now wired too, automatically
+
+        Guarded on kind == "mechanical": the signal connect() this makes
+        re-enters this same hook (for that connection's own two
+        endpoints), and returns immediately there since its kind is
+        "signal" — without the guard this would recurse.
+
+        Only fires for members with their own "shaft" mechanical port. A
+        torque-only member (e.g. ShaftLoad, no speed of its own) has no
+        mechanical connection to trigger this from, so it still needs an
+        explicit `network.connect(shaft, "p{i}", load, "power",
+        kind="signal")` call — or use autowire() below, which makes that
+        one call for you too.
+        """
+        if kind != "mechanical" or other_port != "shaft":
+            return
+        p_key = self._power_port_for_member.get(other)
+        if p_key is not None and "power" in other.signal_ports():
+            network.connect(self, p_key, other, "power", kind="signal")
+
+    def autowire(self, network: "Network") -> None:
+        """Wire every member's "shaft" mechanical port (if it has one) to
+        this Shaft's own m{i} ports — which, via on_connected() above,
+        automatically pulls each member's "power" signal port along with
+        it — plus an explicit signal connect for any torque-only member
+        (e.g. ShaftLoad) that has no mechanical port to trigger that from.
+        Replicates exactly the port-naming __init__ already assumed (m{i}
+        only for speed-tied members, in `members` order; p{i} for every
+        member, in `members` order). Call once, after
+        network.add_component(shaft):
+
+            shaft = Shaft("sh1", members=[turb, comp, load])  # signs inferred
+            network.add_component(shaft)
+            shaft.autowire(network)
+
+        Only a convenience over calling connect() yourself — every member
+        still needs "shaft"/"power" port names exactly matching what
+        Turbine/Compressor/ElectricMotor/Generator/SimpleGenerator/
+        ShaftLoad already use; a custom component with different port
+        names still needs its own explicit connect() call(s).
+        """
+        mech_i = 0
+        for i, member in enumerate(self.members):
+            if "shaft" in member.mechanical_ports():
+                network.connect(self, f"m{mech_i}", member, "shaft", kind="mechanical")
+                mech_i += 1
+            elif "power" in member.signal_ports():
+                network.connect(self, f"p{i}", member, "power", kind="signal")
 
     def ports(self) -> dict[str, str]:
         return {}
@@ -218,7 +318,7 @@ class Shaft(BaseComponent):
         N = state.param(f"{self.name}.N")
         omega = N / _RAD_PER_MIN_TO_RPM
         net_power = self._net_power(state)
-        torque = net_power / omega if omega > 0.0 else 0.0
+        torque = net_power / max(omega, _MIN_OMEGA)
         return {"N": (torque / self.inertia) * _RAD_PER_MIN_TO_RPM}
 
     def residuals(self, state: "NetworkState") -> list[float]:

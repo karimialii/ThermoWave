@@ -1,3 +1,5 @@
+<img src="docs/_static/logo.png" alt="ThermoWave logo" width="160">
+
 # ThermoWave
 
 [![CI](https://github.com/karimialii/ThermoWave/actions/workflows/ci.yml/badge.svg)](https://github.com/karimialii/ThermoWave/actions/workflows/ci.yml)
@@ -220,12 +222,19 @@ publishes `mdot*(h_in-h_out)`, so a reader never has to hold an object
 reference to compute it). `Shaft` (`src/thermowave/components/shaft.py`)
 ties members' shaft speeds together through its own mechanical ports
 (`"m0"`, `"m1"`, ...), one per speed-tied member, plus one signal port
-(`"p0"`, `"p1"`, ...) per member for the power balance — wired explicitly:
+(`"p0"`, `"p1"`, ...) per member for the power balance. Connecting a
+member's mechanical port pulls its signal port in automatically
+(`BaseComponent.on_connected()`, overridden by `Shaft`), so one call wires
+both:
 
 ```python
 network.connect(shaft, "m0", turbine, "shaft", kind="mechanical")
-network.connect(shaft, "p0", turbine, "power", kind="signal")
 ```
+
+`shaft.autowire(network)` (called once after `network.add_component(shaft)`)
+makes this call for every member — including the explicit signal-only
+connect a torque-only member like `ShaftLoad` still needs, since it has no
+mechanical port to trigger the automatic pull from.
 
 `Generator`/`ElectricMotor`/`SimpleGenerator` follow the same pattern —
 a `"shaft"` mechanical port for speed and a `"power"` signal port for the
@@ -662,6 +671,19 @@ section above).
   `SimpleGenerator` (the `component=` constructor arg is gone) — see
   [the gas-turbine guide](docs/tutorials/building-a-gas-turbine-model.md)
   for the updated wiring pattern.
+- **`Shaft` wiring made one call per member, not two — landed.**
+  Connecting a member's mechanical `"shaft"` port now automatically wires
+  its `"power"` signal port too (`BaseComponent.on_connected()`, a generic
+  hook `Network.connect()` fires on both endpoints of every connection —
+  `Shaft` is the only override), and `Shaft.autowire(network)` makes every
+  mechanical/signal `connect()` call a shaft's members need in one go.
+  `Shaft(signs=None)` (the new default) also infers `signs` from each
+  member's own `BaseComponent.shaft_sign()` (`+1.0`/`-1.0`, fixed per
+  class — e.g. `Turbine`/`ElectricMotor` deliver, `Compressor`/
+  `Generator`/`ShaftLoad` draw) instead of requiring it spelled out by
+  hand; pass `signs=[...]` explicitly to override for an edge case (a
+  motor running in regenerative mode). Not a breaking change — every old
+  two-call, explicit-`signs` pattern still works exactly as before.
 - **`SimpleHeatExchanger` repurposed to single-stream, and a merged
   `HeatExchanger` — landed.** `SimpleHeatExchanger` is now a 2-port
   (`in`/`out`) single-fluid-stream component driven by a signed duty `Q`

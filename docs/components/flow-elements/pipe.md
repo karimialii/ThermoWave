@@ -1,6 +1,6 @@
 # Pipe
 
-<img src="../../_static/diagrams/pipe.svg" alt="Pipe diagram" style="max-width:100%">
+<img src="../../_static/diagrams/pipe.svg" alt="Pipe diagram" class="component-diagram">
 
 Darcy-Weisbach friction pressure drop, with optional heat loss.
 Discretized into `n_elem` sub-elements (default 1), each contributing a

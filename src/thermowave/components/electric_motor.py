@@ -58,6 +58,10 @@ class ElectricMotor(BaseComponent):
     def signal_ports(self) -> dict[str, str]:
         return {"power": self._power_port}
 
+    def shaft_sign(self) -> float:
+        return 1.0  # delivers power to the shaft (electrical power in,
+        # scaled down by efficiency, drives the shaft)
+
     def report_category(self) -> str:
         return "motor"
 

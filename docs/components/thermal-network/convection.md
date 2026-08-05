@@ -1,6 +1,6 @@
 # Convection
 
-<img src="../../_static/diagrams/heat_path.svg" alt="Heat path diagram" style="max-width:100%">
+<img src="../../_static/diagrams/heat_path.svg" alt="Heat path diagram" class="component-diagram">
 
 A passive heat path between two `TemperatureSource` endpoints (`a`, `b`) —
 no flow ports, no algebraic residuals of its own. Other components'

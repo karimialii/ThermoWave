@@ -25,8 +25,15 @@ class CoolPropFluid(BaseFluid):
     def _clamp_pressure(self, P: float) -> float:
         return min(max(P, self.P_min), self.P_max)
 
+    def _validate_pressure(self, P: float) -> None:
+        if P < self.P_min or P > self.P_max:
+            raise FluidRangeError(
+                f"CoolProp fluid={self.name!r}: pressure {P} outside valid "
+                f"range [{self.P_min}, {self.P_max}]"
+            )
+
     def density_ph(self, P: float, h: float) -> float:
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("D", "P", P, "H", h, self.name)
         except ValueError as exc:
@@ -35,7 +42,7 @@ class CoolPropFluid(BaseFluid):
             ) from exc
 
     def temperature_ph(self, P: float, h: float) -> float:
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("T", "P", P, "H", h, self.name)
         except ValueError as exc:
@@ -44,7 +51,7 @@ class CoolPropFluid(BaseFluid):
             ) from exc
 
     def enthalpy_pt(self, P: float, T: float) -> float:
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("H", "P", P, "T", T, self.name)
         except ValueError as exc:
@@ -53,7 +60,7 @@ class CoolPropFluid(BaseFluid):
             ) from exc
 
     def cp(self, P: float, T: float) -> float:
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("C", "P", P, "T", T, self.name)
         except ValueError as exc:
@@ -62,7 +69,7 @@ class CoolPropFluid(BaseFluid):
             ) from exc
 
     def cv(self, P: float, T: float) -> float:
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("O", "P", P, "T", T, self.name)
         except ValueError as exc:
@@ -78,7 +85,7 @@ class CoolPropFluid(BaseFluid):
 
     def saturation_temperature(self, P: float) -> float:
         """Saturation (boiling) temperature [K] at pressure P [Pa]."""
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("T", "P", P, "Q", 0, self.name)
         except ValueError as exc:
@@ -97,7 +104,7 @@ class CoolPropFluid(BaseFluid):
 
     def saturated_liquid_enthalpy(self, P: float) -> float:
         """Saturated-liquid specific enthalpy h_f [J/kg] at pressure P [Pa]."""
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("H", "P", P, "Q", 0, self.name)
         except ValueError as exc:
@@ -107,7 +114,7 @@ class CoolPropFluid(BaseFluid):
 
     def saturated_vapor_enthalpy(self, P: float) -> float:
         """Saturated-vapor specific enthalpy h_g [J/kg] at pressure P [Pa]."""
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("H", "P", P, "Q", 1, self.name)
         except ValueError as exc:
@@ -118,7 +125,7 @@ class CoolPropFluid(BaseFluid):
     def enthalpy_pq(self, P: float, x: float) -> float:
         """Specific enthalpy [J/kg] at pressure P [Pa] and vapor quality x [-]
         (0 = saturated liquid, 1 = saturated vapor)."""
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("H", "P", P, "Q", x, self.name)
         except ValueError as exc:
@@ -136,7 +143,7 @@ class CoolPropFluid(BaseFluid):
         against saturation_temperature() rather than relying on the sign
         here.
         """
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("Q", "P", P, "H", h, self.name)
         except ValueError as exc:
@@ -148,7 +155,7 @@ class CoolPropFluid(BaseFluid):
 
     def entropy_ph(self, P: float, h: float) -> float:
         """Specific entropy [J/(kg*K)] at pressure P [Pa], enthalpy h [J/kg]."""
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("S", "P", P, "H", h, self.name)
         except ValueError as exc:
@@ -158,7 +165,7 @@ class CoolPropFluid(BaseFluid):
 
     def enthalpy_ps(self, P: float, s: float) -> float:
         """Specific enthalpy [J/kg] at pressure P [Pa], entropy s [J/(kg*K)]."""
-        P = self._clamp_pressure(P)
+        self._validate_pressure(P)
         try:
             return self._props_si("H", "P", P, "S", s, self.name)
         except ValueError as exc:

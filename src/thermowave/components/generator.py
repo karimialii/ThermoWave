@@ -40,6 +40,10 @@ class Generator(BaseComponent):
         map_path: str,
         efficiency: float = 1.0,
     ):
+        if not (0.0 < efficiency <= 1.0):
+            raise ValueError(
+                f"Generator {name!r}: efficiency must be in (0, 1], got {efficiency}"
+            )
         self.name = name
         self.map = TorqueSpeedMap.from_file(map_path)
         self.efficiency = efficiency
@@ -54,6 +58,9 @@ class Generator(BaseComponent):
 
     def signal_ports(self) -> dict[str, str]:
         return {"power": self._power_port}
+
+    def shaft_sign(self) -> float:
+        return -1.0  # draws power from the shaft to generate electricity
 
     def report_category(self) -> str:
         return "generator"

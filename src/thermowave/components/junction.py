@@ -227,12 +227,26 @@ class Junction(BaseComponent):
         # Newton guess, or a transient's t=0 before flow ramps up) would
         # otherwise raise ZeroDivisionError here instead of letting the
         # solver's own step-limiting/damping machinery recover — h_mix is
-        # physically undefined at mdot_total==0 either way, so flooring the
-        # denominator just makes it 0/floor == 0 instead of NaN/crash.
-        mdot_total_safe = mdot_total if abs(mdot_total) > _MDOT_FLOOR else _MDOT_FLOOR
-        h_mix = (
-            sum(mdot * h for mdot, (_, h) in zip(inlet_mdots, inlet_states)) / mdot_total_safe
-        )
+        # physically undefined at mdot_total==0 either way, so this floors
+        # the degenerate case entirely rather than just the denominator:
+        # dividing the *numerator* (sum(mdot*h)) by a floored denominator
+        # would still blow up to a huge, meaningless h_mix whenever large
+        # near-cancelling counter-flows (not just all-zero ones) drive
+        # mdot_total near zero, since the numerator itself stays large even
+        # though the net flow doesn't. The floor is relative to the gross
+        # throughput (sum of |mdot|), not just an absolute constant, so it
+        # actually catches that near-cancelling case -- a fixed absolute
+        # floor only protects the exactly-all-zero case, since two large
+        # opposing flows can drive mdot_total below any fixed absolute
+        # threshold while the numerator stays at their full scale. A plain
+        # average of the inlet enthalpies keeps h_mix bounded in that
+        # regime instead.
+        mdot_scale = sum(abs(m) for m in inlet_mdots)
+        degenerate_floor = max(_MDOT_FLOOR, 1.0e-6 * mdot_scale)
+        if abs(mdot_total) > degenerate_floor:
+            h_mix = sum(mdot * h for mdot, (_, h) in zip(inlet_mdots, inlet_states)) / mdot_total
+        else:
+            h_mix = sum(h for _, h in inlet_states) / len(inlet_states)
         P_ref = inlet_states[0][0]
         fracs = self._effective_split_fractions(state)
 

@@ -1,11 +1,17 @@
 # Combustor
 
-<img src="../../_static/diagrams/combustor.svg" alt="Combustor diagram" style="max-width:100%">
+<img src="../../_static/diagrams/combustor.svg" alt="Combustor diagram" class="component-diagram">
 
-Uses [Cantera](https://cantera.org/) chemical-equilibrium combustion
-products to find outlet temperature, instead of a fixed LHV (see
-[`SimpleCombustor`](simple-combustor.md)). Requires the optional `cantera`
-extra.
+Two variants: [`Combustor`](#combustor-chemical-equilibrium) uses
+[Cantera](https://cantera.org/) chemical-equilibrium combustion products to
+find outlet temperature, and
+[`SimpleCombustor`](#simplecombustor-fixed-lhv) is a fixed lower-heating-value
+(LHV) heat-release model with no combustion chemistry. Both add fuel mass
+to the flow and share the same `use_fuel_port` fuel-supply pattern.
+
+## `Combustor` (chemical equilibrium)
+
+Requires the optional `cantera` extra.
 
 **Ports:** `in`, `out` (plus `fuel_in` if `use_fuel_port=True`, below)
 &nbsp;·&nbsp; **Parameters:** `PR` (default 0.97),
@@ -36,19 +42,19 @@ P_\text{out} - PR\cdot P_\text{in} = 0
 h_\text{out} - h(P_\text{out}, T_\text{out,target}) + \frac{Q_\text{loss}}{\dot m_\text{out}} = 0
 $$
 
-**`use_fuel_port`** — same idea as [`SimpleCombustor`](simple-combustor.md)'s
-flag: `False` (default) mixes fuel (the `fuel` composition string) with the
-air inlet at the air's own `(T_in, P_in)`, and `mdot_fuel` is a scalar
-(fixed-or-free) parameter, not a port. `True` adds a genuine `fuel_in`
-port — connect a real fuel-supply branch to it (`Source → Pipe →
-combustor`); `mdot_fuel` is then read directly from that branch's own
-solved flow, `mdot_fuel`/`free_parameters()` become no-ops, and two further
-improvements apply on top of `SimpleCombustor`'s equivalent mode: if the
-fuel port's resolved fluid is itself Cantera-flavored (exposes
-`mass_fractions()`/`mechanism` — the same duck-typed check
-[`Junction`](../flow-elements/junction.md)'s mixing uses), its actual
-composition is used instead of the `fuel` string; and the fuel stream is
-evaluated at its own connected `(P, h)` instead of the air inlet's.
+**`use_fuel_port`** — same idea as `SimpleCombustor`'s flag below: `False`
+(default) mixes fuel (the `fuel` composition string) with the air inlet at
+the air's own `(T_in, P_in)`, and `mdot_fuel` is a scalar (fixed-or-free)
+parameter, not a port. `True` adds a genuine `fuel_in` port — connect a
+real fuel-supply branch to it (`Source → Pipe → combustor`); `mdot_fuel` is
+then read directly from that branch's own solved flow, `mdot_fuel`/
+`free_parameters()` become no-ops, and two further improvements apply on
+top of `SimpleCombustor`'s equivalent mode: if the fuel port's resolved
+fluid is itself Cantera-flavored (exposes `mass_fractions()`/`mechanism` —
+the same duck-typed check [`Junction`](../flow-elements/junction.md)'s
+mixing uses), its actual composition is used instead of the `fuel` string;
+and the fuel stream is evaluated at its own connected `(P, h)` instead of
+the air inlet's.
 
 **Composition propagation.** When the combustor's own inlet fluid is a
 `CanteraFluid`, the reacted product composition feeds back into the network
@@ -62,6 +68,49 @@ working fluid. Either way, `product_composition(state)` returns the full
 equilibrium mole-fraction breakdown directly, and the major species (`CO2`,
 `H2O`, `O2`, `N2`, plus `CO`/`NO` above a trace threshold) are surfaced in
 `report_metrics()` as `"X_<species> [-]"`.
+
+## `SimpleCombustor` (fixed LHV)
+
+<img src="../../_static/diagrams/simple_combustor.svg" alt="SimpleCombustor diagram" class="component-diagram">
+
+A fixed lower-heating-value (LHV) heat-release model: no combustion
+chemistry, fuel is treated as pure heat release into the existing working
+fluid. Fuel mass is added to the flow.
+
+**Ports:** `in`, `out` (plus `fuel_in` if `use_fuel_port=True`, shown below)
+&nbsp;·&nbsp; **Parameters:** `LHV`, `PR` (default 0.97), `efficiency`
+(default 1.0), `mdot_fuel` (leave `None` to solve for it), `use_fuel_port`,
+`heat_path` (optional)
+
+$$
+Q = \dot m_\text{fuel}\cdot LHV \cdot \eta
+\qquad
+\dot m_\text{out} = \dot m_\text{in} + \dot m_\text{fuel}
+$$
+
+$$
+P_\text{out} - PR\cdot P_\text{in} = 0
+$$
+
+$$
+\dot m_\text{out}\,h_\text{out} - \left(\dot m_\text{in}\,h_\text{in} + \dot m_\text{fuel}\,h_\text{fuel,in} + Q - Q_\text{loss}\right) = 0
+$$
+
+(`h_fuel,in` only enters if `use_fuel_port=True`; otherwise fuel's own
+sensible enthalpy is ignored as negligible next to LHV.)
+
+<img src="../../_static/diagrams/simple_combustor_fuel_port.svg" alt="SimpleCombustor with a fuel port" class="component-diagram">
+
+**Two ways to get `mdot_fuel`:**
+
+- `use_fuel_port=False` (default): give `mdot_fuel` directly, or leave
+  `None` to make it a free parameter driven by a
+  [`Setpoint`](../control/setpoint.md)/[`Controller`](../control/controller.md)
+  elsewhere (e.g. a target turbine inlet temperature).
+- `use_fuel_port=True`: a genuine third port, `fuel_in`, appears — connect a
+  real fuel-supply branch to it (`Source → Pipe → combustor`). `mdot_fuel`
+  is then read directly from that branch's own solved flow, and its actual
+  `(P, h)` is used for a more complete energy balance.
 
 ---
 Part of [Combustion](index.md).

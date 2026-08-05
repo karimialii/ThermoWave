@@ -73,6 +73,18 @@ class Nozzle(BaseComponent):
     flow from the upstream/downstream pressures, so residuals() instead
     solves for mdot from continuity at the throat (density there × area ×
     velocity), the reverse direction from Pipe's own dp = f(mdot).
+
+    Back-pressure inversion (P_out > P_in): a converging nozzle can't pass
+    reverse flow (that would need a diffuser, a different component this
+    class doesn't model, the same kind of explicit scope boundary as the
+    diverging section's off-design shock behavior above) — this gives
+    dh_throat_ideal < 0, which mdot is clamped to 0 rather than a negative
+    or complex value. This isn't the true physical answer (real reverse
+    flow would occur), just a safe stand-in that lets the solver's own
+    pressure residuals push the network away from this state. Check
+    report_metrics()'s "reverse_pressure [-]" flag if a converged result
+    still shows this, since it means something else in the network is
+    forcing an unrealizable operating point on this nozzle.
     """
 
     def __init__(
@@ -181,6 +193,7 @@ class Nozzle(BaseComponent):
             "h_out": h_throat_actual,
             "PR": PR,
             "choked": choked,
+            "reverse_pressure": PR > 1.0,
             "V_throat": V_throat,
             "Mach_throat": V_throat / a_throat if a_throat > 0.0 else 0.0,
         }
@@ -223,6 +236,7 @@ class Nozzle(BaseComponent):
             "mdot [kg/s]": flow["mdot"],
             "PR [-]": flow["PR"],
             "choked [-]": 1.0 if flow["choked"] else 0.0,
+            "reverse_pressure [-]": 1.0 if flow["reverse_pressure"] else 0.0,
         }
         if "V_exit" in flow:
             metrics["V_exit [m/s]"] = flow["V_exit"]

@@ -1,18 +1,55 @@
-<svg viewBox="0 0 520 260" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-    <path d="M0,0 L10,5 L0,10 z" fill="#2b3a4a"/>
-  </marker>
-  <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-    <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
-  </marker>
-  <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-    <path d="M0,0 L10,5 L0,10 z" fill="#1a6b8f"/>
-  </marker>
-</defs>
-<style>
-  .lbl { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; fill:#2b3a4a; }
-  .tag { font-family:Menlo,Consolas,monospace; font-size:12px; fill:#2b3a4a; }
-  .title { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; font-weight:600; fill:#2b3a4a; }
-</style>
-<text x="200.0" y="22" text-anchor="middle" class="title">Schedule (drives a plain attribute over time)</text><polyline points="170.0,160.0 210.0,160.0 260.0,110.0 310.0,110.0" fill="none" stroke="#2b3a4a" stroke-width="2"/><text x="170.0" y="178.0" class="tag">breakpoints (t, value)</text><line x1="320.0" y1="130.0" x2="380.0" y2="130.0" stroke="#1a6b8f" stroke-width="2" marker-end="url(#arrow-blue)"/><rect x="380.0" y="110.0" width="130" height="40" rx="8" fill="#eef3f7" stroke="#2b3a4a" stroke-width="2"/><text x="445.0" y="135.0" text-anchor="middle" class="lbl">target.attr</text></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Creator: CorelDRAW 2026 (Evaluation Version) -->
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="20.3928mm" height="4.2252mm" version="1.1" style="shape-rendering:geometricPrecision; text-rendering:geometricPrecision; image-rendering:optimizeQuality; fill-rule:evenodd; clip-rule:evenodd"
+viewBox="0 0 2039.28 422.52"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:xodm="http://www.corel.com/coreldraw/odm/2003">
+ <defs>
+  <font id="FontID0" horiz-adv-x="666" font-variant="normal" style="fill-rule:nonzero" font-weight="400">
+	<font-face 
+		font-family="Helvetica">
+		<font-face-src>
+			<font-face-name name="Helvetica"/>
+		</font-face-src>
+	</font-face>
+   <missing-glyph><path d="M0 0z"/></missing-glyph>
+   <glyph unicode="C" horiz-adv-x="722" d="M378.003 737.014c90.9928,0 162.001,-2.40238e+001 211.998,-7.20006e+001 49.9965,-4.80122e+001 77.9888,-1.02013e+002 82.9849,-1.63029e+002l-9.39692e+001 0c-1.10198e+001,46.0279 -3.30239e+001,83.0203 -6.50202e+001,110.021 -3.19963e+001,27.0002 -7.69967e+001,40.0043 -1.35001e+002,40.0043 -6.99809e+001,0 -1.26993e+002,-2.40238e+001 -1.71001e+002,-7.40203e+001 -4.29807e+001,-4.99965e+001 -6.49848e+001,-1.26001e+002 -6.49848e+001,-2.27978e+002 0,-8.40125e+001 19.9844,-1.52009e+002 58.9965,-2.05017e+002 39.0121,-5.19807e+001 98.0086,-7.79888e+001 175.005,-7.79888e+001 72.0006,0 126.993,27.0002 163.986,81.9928 20.0198,29.0199 35.0081,67.0045 44.0082,115.017l94.9968 0c-8.00794e+000,-7.60045e+001 -3.60003e+001,-1.39005e+002 -8.40125e+001,-1.90029e+002 -5.69768e+001,-6.19729e+001 -1.33973e+002,-9.29771e+001 -2.29998e+002,-9.29771e+001 -8.3977e+001,0 -1.53993e+002,26.0081 -2.09978e+002,76.0045 -7.50124e+001,67.0045 -1.12005e+002,169.974 -1.12005e+002,308.979 0,106.017 27.9923,193.005 83.977,260.01 60.0241,73.9848 144.001,111.013 250.018,111.013z"/>
+   <glyph unicode="D" horiz-adv-x="722" d="M351.995 82.9849c31.9963,0 58.9965,3.01183 81.0006,10.0276 36.9924,13.004 67.9966,36.9924 92.0204,73.9848 19.9844,27.9923 32.9884,66.0123 41.9885,111.013 4.9961,27.0002 6.98037,51.9807 6.98037,74.977 0,89.0086 -1.69726e+001,157.997 -5.29729e+001,207.002 -3.50081e+001,49.0043 -9.20204e+001,74.0203 -1.70009e+002,74.0203l-1.72986e+002 0 0 -5.51024e+002 173.978 0zm-2.70994e+002 634.009l289.987 0c99.0008,0 175.005,-3.50081e+001 229.998,-1.04989e+002 48.0122,-6.30005e+001 72.0006,-1.44001e+002 72.0006,-2.4201e+002 0,-7.69967e+001 -1.39962e+001,-1.44993e+002 -4.29807e+001,-2.07002e+002 -4.99965e+001,-1.08993e+002 -1.37021e+002,-1.62993e+002 -2.6001e+002,-1.62993e+002l-2.88994e+002 0 0 716.994z"/>
+   <glyph unicode="E" horiz-adv-x="666" d="M85.0046 716.994l522.996 0 0 -8.7981e+001 -4.27999e+002 0 0 -2.17029e+002 396.003 0 0 -8.29849e+001 -3.96003e+002 0 0 -2.43994e+002 436.007 0 0 -8.50046e+001 -5.31004e+002 0 0 716.994z"/>
+   <glyph unicode="H" horiz-adv-x="722" d="M79.0164 716.994l97.9732 0 0 -2.9601e+002 373.007 0 0 296.01 98.0086 0 0 -7.16994e+002 -9.80086e+001 0 0 334.987 -3.73007e+002 0 0 -3.34987e+002 -9.79732e+001 0 0 716.994z"/>
+   <glyph unicode="S" horiz-adv-x="666" d="M139.997 230.99c2.0197,-4.00043e+001 12.0119,-7.29927e+001 27.9923,-9.90008e+001 33.0239,-4.69846e+001 89.0086,-7.0973e+001 171.001,-7.0973e+001 36.0003,0 70.0163,4.9961 99.0008,15.9804 58.0044,20.0198 87.0243,56.0201 87.0243,108.001 0,39.0121 -1.20119e+001,67.0045 -3.60003e+001,84.0125 -2.50159e+001,15.9804 -6.40281e+001,29.9766 -1.16009e+002,41.9885l-9.80086e+001 22.0041c-6.30005e+001,13.9962 -1.08001e+002,30.012 -1.34009e+002,46.9846 -4.59925e+001,30.012 -6.89887e+001,75.0124 -6.89887e+001,135.001 0,64.0281 22.9962,117.001 67.0045,157.997 45.0004,42.024 108.001,62.0084 189.994,62.0084 75.0124,0 139.005,-1.80001e+001 190.986,-5.40004e+001 53.0083,-3.60003e+001 79.0164,-9.40047e+001 79.0164,-1.73978e+002l-9.09928e+001 0c-4.9961e+000,37.9846 -1.50237e+001,67.9966 -3.10042e+001,87.981 -3.0012e+001,38.02 -8.00085e+001,56.0201 -1.51017e+002,56.0201 -5.80044e+001,0 -9.90008e+001,-1.20119e+001 -1.23981e+002,-3.60003e+001 -2.50159e+001,-2.40238e+001 -3.69924e+001,-5.20162e+001 -3.69924e+001,-8.40125e+001 0,-3.50081e+001 13.9962,-6.10162e+001 42.9807,-7.69967e+001 20.0198,-9.9922e+000 63.0005,-2.29962e+001 130.997,-3.90121e+001l99.9929 -2.29962e+001c49.0043,-1.09843e+001 86.0322,-2.60081e+001 113.032,-4.50004e+001 45.0004,-3.4016e+001 67.9966,-8.29849e+001 67.9966,-1.45985e+002 0,-8.00085e+001 -2.90199e+001,-1.37021e+002 -8.70243e+001,-1.71001e+002 -5.69768e+001,-3.4016e+001 -1.23981e+002,-5.1024e+001 -2.00978e+002,-5.1024e+001 -8.90086e+001,0 -1.59025e+002,22.9962 -2.09021e+002,67.9966 -5.09886e+001,46.0279 -7.60045e+001,107.009 -7.4977e+001,184.005l91.985 0z"/>
+  </font>
+  <style type="text/css">
+   <![CDATA[
+    @font-face { font-family:"Helvetica";font-variant:normal;font-weight:normal;src:url("#FontID0") format(svg)}
+    .str2 {stroke:#373535;stroke-width:20;stroke-miterlimit:22.9256}
+    .str1 {stroke:#373535;stroke-width:20;stroke-miterlimit:22.9256}
+    .str0 {stroke:black;stroke-width:15;stroke-miterlimit:22.9256}
+    .str3 {stroke:#373535;stroke-width:10;stroke-miterlimit:22.9256}
+    .fil0 {fill:none}
+    .fil3 {fill:white}
+    .fil2 {fill:#373535}
+    .fil1 {fill:white}
+    .fnt0 {font-weight:normal;font-size:282.22px;font-family:'Helvetica'}
+   ]]>
+  </style>
+ </defs>
+ <g id="Layer_x0020_1">
+  <metadata id="CorelCorpID_0Corel-Layer"/>
+  <g id="_53909572608">
+   <line class="fil0 str0" x1="-4.83" y1="370.67" x2="2034.45" y2= "370.67" />
+  </g>
+  <circle class="fil1 str1" cx="1014.85" cy="370.67" r="42.04"/>
+  <g id="_39592262240">
+   <g transform="matrix(1 0 0 1 -6.1656E+002 -3.12E+000)">
+    <text x="1019.64" y="211.26"  class="fil2 fnt0">SCHED</text>
+   </g>
+  </g>
+  <g id="_39592263328">
+   <path class="fil0 str2" d="M1530.59 21.05c-34.82,2.45 -64.74,25.66 -75.77,58.78 -11.02,33.12 -0.99,69.63 25.41,92.46 26.41,22.84 63.98,27.5 95.17,11.81 31.18,-15.69 49.83,-48.63 47.23,-83.45"/>
+   <polyline class="fil0 str3" points="1533.4,56.65 1533.4,107.18 1577.13,132.42 "/>
+   <circle class="fil3 str3" cx="1533.4" cy="107.18" r="16.26"/>
+  </g>
+ </g>
+</svg>

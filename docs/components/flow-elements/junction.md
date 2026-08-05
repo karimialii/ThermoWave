@@ -1,6 +1,6 @@
 # Junction
 
-<img src="../../_static/diagrams/junction.svg" alt="Junction diagram" style="max-width:100%">
+<img src="../../_static/diagrams/junction.svg" alt="Junction diagram" class="component-diagram">
 
 Any number of inlets combine and split into any number of outlets — a
 zero-loss, zero-volume plenum (`n_inlets=1` is a pure splitter, `n_outlets=1`

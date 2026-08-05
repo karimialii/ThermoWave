@@ -1,6 +1,6 @@
 # Tank
 
-<img src="../../_static/diagrams/tank.svg" alt="Tank diagram" style="max-width:100%">
+<img src="../../_static/diagrams/tank.svg" alt="Tank diagram" class="component-diagram">
 
 A constant-volume plenum with real mass/energy storage — the genuinely
 transient counterpart to [`Junction`](../flow-elements/junction.md)'s

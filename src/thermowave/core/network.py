@@ -496,6 +496,16 @@ class Network:
 
         connection = Connection(from_component, from_port, to_component, to_port, kind)
         self.connections.append(connection)
+
+        # Let either endpoint react to being connected (e.g. Shaft pulling
+        # a member's power signal in alongside its speed tie) -- see
+        # BaseComponent.on_connected()'s own docstring. Fires after this
+        # connection is fully committed (union-find, graph edge, and
+        # self.connections all updated), so a reacting override's own
+        # connect() calls see a consistent state and can't observe this
+        # one as only half-applied.
+        from_component.on_connected(from_port, kind, to_component, to_port, self)
+        to_component.on_connected(to_port, kind, from_component, from_port, self)
         return connection
 
     def _ports_for_kind(self, component: "BaseComponent", kind: str) -> dict[str, str]:

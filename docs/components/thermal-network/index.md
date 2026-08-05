@@ -29,11 +29,11 @@ radiation
 
 ## Wiring a heat path into the flow network
 
-[`Turbine`](../turbomachinery/turbine.md), [`Compressor`](../turbomachinery/compressor.md),
-[`SimpleTurbine`](../turbomachinery/simple-turbine.md),
-[`SimpleCompressor`](../turbomachinery/simple-compressor.md),
-[`SimpleCombustor`](../combustion/simple-combustor.md), and
-[`Combustor`](../combustion/combustor.md) each accept an optional
+[`Turbine`](../turbomachinery/turbine.md#turbine-map-driven), [`Compressor`](../turbomachinery/compressor.md#compressor-map-driven),
+[`SimpleTurbine`](../turbomachinery/turbine.md#simpleturbine-fixed-ratio),
+[`SimpleCompressor`](../turbomachinery/compressor.md#simplecompressor-fixed-ratio),
+[`SimpleCombustor`](../combustion/combustor.md#simplecombustor-fixed-lhv), and
+[`Combustor`](../combustion/combustor.md#combustor-chemical-equilibrium) each accept an optional
 `heat_path` attribute (`None` by default — fully adiabatic). Since a path
 needs `(component, "out")` as one of its own endpoints, it can only be
 built *after* that component exists:

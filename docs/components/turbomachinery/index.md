@@ -8,19 +8,16 @@ that couple these machines mechanically/electrically, see
 ```{toctree}
 :maxdepth: 1
 
-simple-compressor
 compressor
-simple-turbine
 turbine
-steam-turbine
 pump
 ```
 
 | Component | Role |
 |---|---|
-| [`SimpleCompressor`](simple-compressor.md) | Fixed pressure ratio + isentropic efficiency, no map. |
-| [`Compressor`](compressor.md) | Map-driven (Flownex `.cop`), `PR`/efficiency read off iso-speed curves. |
-| [`SimpleTurbine`](simple-turbine.md) | Fixed expansion ratio + isentropic efficiency, no map. |
-| [`Turbine`](turbine.md) | Map-driven (Flownex `.tur`), same corrected-parameter approach as `Compressor`. |
-| [`SteamTurbine`](steam-turbine.md) | Entropy-based expansion, correct through the two-phase dome. |
+| [`Compressor`](compressor.md#compressor-map-driven) | Map-driven (Flownex `.cop`), `PR`/efficiency read off iso-speed curves. |
+| [`SimpleCompressor`](compressor.md#simplecompressor-fixed-ratio) | Fixed pressure ratio + isentropic efficiency, no map. |
+| [`Turbine`](turbine.md#turbine-map-driven) | Map-driven (Flownex `.tur`), same corrected-parameter approach as `Compressor`. |
+| [`SimpleTurbine`](turbine.md#simpleturbine-fixed-ratio) | Fixed expansion ratio + isentropic efficiency, no map. |
+| [`SteamTurbine`](turbine.md#steamturbine-wet-steam) | Entropy-based expansion, correct through the two-phase dome. |
 | [`Pump`](pump.md) | Entropy-based liquid pump, closes a Rankine loop's low-pressure side. |

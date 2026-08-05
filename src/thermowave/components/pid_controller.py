@@ -111,7 +111,7 @@ class PIDController(BaseComponent):
         self.bias = output0
         self._output0 = output0
         self._integral = 0.0
-        self._prev_error: float | None = None
+        self._prev_measured: float | None = None
 
     def ports(self) -> dict[str, str]:
         return {}
@@ -163,19 +163,30 @@ class PIDController(BaseComponent):
         self.output = self._output0
         self.bias = self._output0
         self._integral = 0.0
-        self._prev_error = None
+        self._prev_measured = None
 
     def step(self, state: "NetworkState", dt: float) -> float:
         """Advance the controller by one transient step: read the sensor off
         the just-solved state, compute the PID law, and update self.output
         (the value residuals() will pin free_param to on the *next* solve).
         Returns the new self.output. dt <= 0 skips the derivative term (only
-        relevant for the very first call, where there's no previous error).
+        relevant for the very first call, where there's no previous
+        measurement). The derivative term is computed on the measurement,
+        not the error, to avoid a "derivative kick" -- see step()'s own
+        inline comment.
         """
-        error = self.setpoint - self._measured(state)
+        measured = self._measured(state)
+        error = self.setpoint - measured
         derivative = 0.0
-        if self._prev_error is not None and dt > 0.0:
-            derivative = (error - self._prev_error) / dt
+        if self._prev_measured is not None and dt > 0.0:
+            # Derivative-on-measurement, not derivative-on-error: d(error)/dt
+            # = d(setpoint)/dt - d(measured)/dt, so differentiating error
+            # directly injects a Kd * d(setpoint)/dt spike ("derivative
+            # kick") into output on every setpoint step -- e.g. a Schedule
+            # driving self.setpoint in "step" mode. Differentiating the
+            # measurement alone tracks the same plant response without
+            # reacting to the setpoint command itself.
+            derivative = -(measured - self._prev_measured) / dt
         candidate_integral = self._integral + error * dt if dt > 0.0 else self._integral
 
         bias = self.feedforward(state) if self.feedforward is not None else self.bias
@@ -190,7 +201,7 @@ class PIDController(BaseComponent):
             self._integral = candidate_integral
 
         self.output = clamped_output
-        self._prev_error = error
+        self._prev_measured = measured
         return self.output
 
     def residuals(self, state: "NetworkState") -> list[float]:

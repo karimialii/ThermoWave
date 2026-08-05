@@ -66,12 +66,11 @@ def _build_engine(load_watts=5_000.0, heat_input=-400_000.0):
         network.add_component(component)
 
     # mechanical/signal wiring: comp and turb carry a real speed unknown
-    # (m0/m1); load is torque-only (no speed unknown), so it only gets a
-    # signal (power) connection, not a mechanical one.
+    # (m0/m1), and connecting it pulls their power signal in automatically
+    # (Shaft.on_connected()); load is torque-only (no speed unknown), so it
+    # only gets an explicit signal (power) connection, not a mechanical one.
     network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
     network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
-    network.connect(shaft, "p0", comp, "power", kind="signal")
-    network.connect(shaft, "p1", turb, "power", kind="signal")
     network.connect(shaft, "p2", load, "power", kind="signal")
 
     # 3. thermal components

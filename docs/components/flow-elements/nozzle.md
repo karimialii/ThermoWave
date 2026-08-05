@@ -1,6 +1,6 @@
 # Nozzle
 
-<img src="../../_static/diagrams/nozzle.svg" alt="Nozzle diagram" style="max-width:100%">
+<img src="../../_static/diagrams/nozzle.svg" alt="Nozzle diagram" class="component-diagram">
 
 A converging (or converging-diverging, with `D_exit`) nozzle: converts a
 pressure/enthalpy drop into velocity — a [`Turbine`](../turbomachinery/turbine.md)

@@ -24,3 +24,6 @@ dist/
 # scripts in examples/, don't commit ad hoc; move curated ones to assets/images/
 /*.png
 /*.txt
+
+# Sphinx build output (Read the Docs builds this fresh)
+docs/_build/

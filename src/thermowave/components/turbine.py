@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
 from thermowave.components.heat_transfer import heat_loss_watts
-from thermowave.core.constants import N_GUESS_T_FALLBACK, PA_PER_BAR
+from thermowave.core.constants import MDOT_FLOOR, N_GUESS_T_FALLBACK, PA_PER_BAR
+from thermowave.core.exceptions import FluidRangeError
 from thermowave.maps.characteristic_map import CharacteristicMap
 
 if TYPE_CHECKING:
@@ -100,6 +101,10 @@ class Turbine(BaseComponent):
     def signal_ports(self) -> dict[str, str]:
         return {"power": self._power_port}
 
+    def shaft_sign(self) -> float:
+        return 1.0  # delivers power to the shaft (report_metrics()'s
+        # mdot*(h_in-h_out) is positive when expanding)
+
     def report_category(self) -> str:
         return "turbomachinery"
 
@@ -148,6 +153,28 @@ class Turbine(BaseComponent):
         P_in, h_in = state.node(self._inlet_node)
         T_in = state.fluid_at(self._inlet_node).temperature_ph(P_in, h_in)
         mdot = state.mdot(self._inlet_node)
+        if T_in <= 0.0:
+            # A bad Newton iterate landing on a negative T_in would
+            # otherwise make T_in**0.5 silently return a complex number
+            # (Python 3's behavior for a negative float base) instead of
+            # failing at the source -- surfacing as a confusing TypeError
+            # far downstream instead. Same recoverable-invalid-state signal
+            # a real fluid backend already raises for this trial.
+            raise FluidRangeError(
+                f"Turbine {self.name!r}: inlet temperature must be "
+                f"positive, got T_in={T_in} K"
+            )
+        if mdot < 0.0:
+            # Reverse/windmilling flow isn't represented in this map's
+            # tabulated data -- without this check, _interpolate_1d would
+            # just clamp the negative corrected flow to the map's lowest
+            # tabulated point and return a normal-looking but physically
+            # wrong PR/efficiency instead of flagging that this state can't
+            # be evaluated.
+            raise FluidRangeError(
+                f"Turbine {self.name!r}: reverse flow (mdot={mdot} kg/s) "
+                "is not supported by this component's characteristic map"
+            )
         N = self._shaft_speed(state)
         A = (N / 60.0) / T_in**0.5
         B = mdot * T_in**0.5 / (P_in / PA_PER_BAR)
@@ -170,7 +197,7 @@ class Turbine(BaseComponent):
         Q_loss = heat_loss_watts(self.heat_path, state)
 
         momentum_residual = P_in - PR * P_out
-        energy_residual = h_out - (h_in - dh_actual) + Q_loss / mdot_in
+        energy_residual = h_out - (h_in - dh_actual) + Q_loss / max(mdot_in, MDOT_FLOOR)
         mass_residual = state.mdot(self._outlet_node) - mdot_in
         return [momentum_residual, energy_residual, mass_residual]
 

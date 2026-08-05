@@ -27,6 +27,10 @@ class SimpleGenerator(BaseComponent):
     """
 
     def __init__(self, name: str, efficiency: float):
+        if not (0.0 < efficiency <= 1.0):
+            raise ValueError(
+                f"SimpleGenerator {name!r}: efficiency must be in (0, 1], got {efficiency}"
+            )
         self.name = name
         self.efficiency = efficiency
         self._shaft_port = f"{name}.shaft"
@@ -40,6 +44,9 @@ class SimpleGenerator(BaseComponent):
 
     def signal_ports(self) -> dict[str, str]:
         return {"power": self._power_port}
+
+    def shaft_sign(self) -> float:
+        return -1.0  # draws power from the shaft to generate electricity
 
     def report_category(self) -> str:
         return "generator"

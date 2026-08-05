@@ -1,6 +1,6 @@
 # Controller
 
-<img src="../../_static/diagrams/controller.svg" alt="Controller diagram" style="max-width:100%">
+<img src="../../_static/diagrams/controller.svg" alt="Controller diagram" class="component-diagram">
 
 Drives a component's free parameter until a [`Sensor`](sensor.md) reads a
 target value — an ideal, infinite-gain controller with no dynamics,

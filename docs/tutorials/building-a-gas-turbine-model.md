@@ -76,28 +76,36 @@ ETA_GEN, ETA_MECH = 0.96, 0.98
 
 load  = ShaftLoad(name="load", power=75_000.0, efficiency=ETA_GEN * ETA_MECH)
 shaft = Shaft(
-    name="shaft", members=[comp, turb, load], signs=[-1.0, 1.0, -1.0],
+    name="shaft", members=[comp, turb, load],
     efficiency=1.0, inertia=0.05, dynamic=True, N0=62_000.0,
 )
 ```
 
-`signs` follows power flow: turbine `+1` (delivers), compressor `-1` (absorbs),
-load `-1` (draws). Two indexing rules that differ inside one constructor:
-`signs` has one entry per entry in `members`, but `gear_ratios` has one per
-*speed-tied* member only (`load` has no `"shaft"` mechanical port, so it's
-torque-only and doesn't count).
+`signs` is left at its default (`None`) here — it's inferred from each
+member's own `shaft_sign()`: turbine `+1` (delivers), compressor `-1`
+(absorbs), load `-1` (draws), the same answer you'd get writing
+`signs=[-1.0, 1.0, -1.0]` by hand. Pass `signs` explicitly only to override
+one of these for a genuine edge case (a motor running in regenerative mode,
+say). `gear_ratios`, unlike `signs`, has one entry per *speed-tied* member
+only (`load` has no `"shaft"` mechanical port, so it's torque-only and
+doesn't count there).
 
-Every member's `"shaft"`/`"power"` ports need explicit wiring — `Shaft`
-exposes one mechanical port (`"m0"`, `"m1"`, ...) per speed-tied member and
-one signal port (`"p0"`, `"p1"`, ...) per member, in `members` order:
+`Shaft` exposes one mechanical port (`"m0"`, `"m1"`, ...) per speed-tied
+member and one signal port (`"p0"`, `"p1"`, ...) per member, in `members`
+order. Connecting a member's mechanical port pulls its power signal in
+automatically — a real shaft doesn't have a separate wire for power either —
+so `comp`/`turb` only need one `connect()` call each; `load` has no
+`"shaft"` mechanical port to piggyback on, so it still needs its own
+explicit signal connection:
 
 ```python
 network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
 network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
-network.connect(shaft, "p0", comp, "power", kind="signal")
-network.connect(shaft, "p1", turb, "power", kind="signal")
 network.connect(shaft, "p2", load, "power", kind="signal")
 ```
+
+(Or skip writing these by hand entirely: `shaft.autowire(network)`, called
+once after `add_component(shaft)`, makes all three calls for you.)
 
 Use `ShaftLoad`, not `SimpleGenerator`, on a dynamic shaft. `SimpleGenerator` is
 a passive reader — it reports power but exerts no torque, so it never closes the

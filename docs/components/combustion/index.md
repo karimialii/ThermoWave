@@ -6,11 +6,10 @@ at different levels of fidelity.
 ```{toctree}
 :maxdepth: 1
 
-simple-combustor
 combustor
 ```
 
 | Component | Role |
 |---|---|
-| [`SimpleCombustor`](simple-combustor.md) | Fixed lower-heating-value (LHV) heat release, no combustion chemistry. |
-| [`Combustor`](combustor.md) | Cantera chemical-equilibrium combustion products, real adiabatic-flame-temperature physics. |
+| [`Combustor`](combustor.md#combustor-chemical-equilibrium) | Cantera chemical-equilibrium combustion products, real adiabatic-flame-temperature physics. |
+| [`SimpleCombustor`](combustor.md#simplecombustor-fixed-lhv) | Fixed lower-heating-value (LHV) heat release, no combustion chemistry. |

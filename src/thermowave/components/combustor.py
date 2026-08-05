@@ -108,6 +108,12 @@ class Combustor(BaseComponent):
         heat_path: BaseComponent | None = None,
         use_fuel_port: bool = False,
     ):
+        if not (0.0 < PR <= 1.0):
+            raise ValueError(f"Combustor {name!r}: PR must be in (0, 1], got {PR}")
+        if not (0.0 < efficiency <= 1.0):
+            raise ValueError(
+                f"Combustor {name!r}: efficiency must be in (0, 1], got {efficiency}"
+            )
         try:
             import cantera as ct
         except ImportError as exc:

@@ -1,9 +1,9 @@
 # ElectricMotor
 
-<img src="../../_static/diagrams/electric_motor.svg" alt="ElectricMotor diagram" style="max-width:100%">
+<img src="../../_static/diagrams/electric_motor.svg" alt="ElectricMotor diagram" class="component-diagram">
 
 Electrically-driven mechanical power source — the inverse of
-[`SimpleGenerator`](simple-generator.md). A passive reader with no flow
+[`SimpleGenerator`](generator.md#simplegenerator-fixed-efficiency). A passive reader with no flow
 ports: it reads a mechanical component's own required shaft power through a
 `"power"` signal port (e.g. an electrically-driven compressor with no
 turbine on its shaft) and reports the electrical power that must be drawn

@@ -15,6 +15,18 @@ class _SpeedLine:
     non-dimensional mass flow, at a single corrected speed."""
 
     def __init__(self, speed: float, mass_flow: list[float], value: list[float]):
+        # _interpolate_1d below assumes mass_flow is ascending (both its own
+        # np.interp call and its b[0]/b[-1] clamp bounds) but never checks
+        # it -- np.interp doesn't validate this either, it silently
+        # produces wrong interpolated values for non-ascending input rather
+        # than raising. A malformed map file (a data-entry error, or a
+        # vendor format quirk) would otherwise fail silently here instead
+        # of at the one place that actually knows the raw row.
+        if any(b2 <= b1 for b1, b2 in zip(mass_flow, mass_flow[1:])):
+            raise ValueError(
+                f"Characteristic map speed line at speed={speed}: mass_flow values "
+                f"must be strictly increasing, got {mass_flow}"
+            )
         self.speed = speed
         self.mass_flow = mass_flow
         self.value = value

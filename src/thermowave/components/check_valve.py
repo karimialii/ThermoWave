@@ -8,6 +8,11 @@ from thermowave.components.base_component import BaseComponent
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
 
+_MIN_OPENING = 1.0e-6  # floor for opening below -- same rationale as
+# Valve's own _MIN_OPENING: opening=0.0 (fully closed) would otherwise make
+# K_eff = K / opening**2 divide by zero instead of giving a very large but
+# finite resistance.
+
 
 class CheckValve(BaseComponent):
     """One-way flow-restriction valve: lets flow through like Valve in the
@@ -15,8 +20,10 @@ class CheckValve(BaseComponent):
     reverse flow — a real boundary condition against backflow, rather than
     just hoping the network's own topology/pressures never ask for it.
 
-    Same K-factor pressure-drop idea as Valve, but with two changes needed
-    for a one-way device to make sense at all:
+    Same K-factor pressure-drop idea as Valve (opening in [0, 1], floored at
+    _MIN_OPENING so opening=0.0 gives a very large but finite resistance
+    rather than dividing by zero), but with two changes needed for a
+    one-way device to make sense at all:
 
     1. dp = K_eff * rho * v * |v| / 2 (using v*|v| rather than Valve's v**2)
        so the *direction* of the pressure drop tracks the direction of
@@ -45,8 +52,12 @@ class CheckValve(BaseComponent):
     def __init__(
         self, name: str, D: float, K: float, opening: float = 1.0, reverse_factor: float = 1000.0
     ):
+        if D <= 0.0:
+            raise ValueError(f"CheckValve {name!r}: D must be > 0, got {D}")
         if K <= 0.0:
             raise ValueError(f"CheckValve {name!r}: K must be > 0, got {K}")
+        if not (0.0 <= opening <= 1.0):
+            raise ValueError(f"CheckValve {name!r}: opening must be in [0, 1], got {opening}")
         if reverse_factor <= 1.0:
             raise ValueError(
                 f"CheckValve {name!r}: reverse_factor must be > 1 (otherwise it isn't "
@@ -72,7 +83,7 @@ class CheckValve(BaseComponent):
         rho = state.fluid_at(self._inlet_node).density_ph(P_in, h_in)
         v = mdot / (rho * self._area)
         K = self.K if v >= 0.0 else self.K * self.reverse_factor
-        K_eff = K / self.opening**2
+        K_eff = K / max(self.opening, _MIN_OPENING) ** 2
         dp_loss = K_eff * (rho * v * abs(v) / 2.0)
 
         momentum_residual = P_in - P_out - dp_loss

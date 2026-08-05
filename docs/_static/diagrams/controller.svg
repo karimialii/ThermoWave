@@ -1,18 +1,40 @@
-<svg viewBox="0 0 520 260" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-    <path d="M0,0 L10,5 L0,10 z" fill="#2b3a4a"/>
-  </marker>
-  <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-    <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
-  </marker>
-  <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-    <path d="M0,0 L10,5 L0,10 z" fill="#1a6b8f"/>
-  </marker>
-</defs>
-<style>
-  .lbl { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; fill:#2b3a4a; }
-  .tag { font-family:Menlo,Consolas,monospace; font-size:12px; fill:#2b3a4a; }
-  .title { font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; font-weight:600; fill:#2b3a4a; }
-</style>
-<text x="200.0" y="22" text-anchor="middle" class="title">Controller</text><rect x="60" y="130.0" width="110" height="40" rx="8" fill="#eef3f7" stroke="#2b3a4a" stroke-width="2"/><text x="115.0" y="155.0" text-anchor="middle" class="lbl">Sensor</text><rect x="205.0" y="130.0" width="110" height="40" rx="8" fill="#eef3f7" stroke="#2b3a4a" stroke-width="2"/><text x="260.0" y="155.0" text-anchor="middle" class="lbl">Controller</text><rect x="350" y="130.0" width="110" height="40" rx="8" fill="#eef3f7" stroke="#2b3a4a" stroke-width="2"/><text x="405.0" y="155.0" text-anchor="middle" class="lbl">component</text><line x1="170" y1="150.0" x2="205.0" y2="150.0" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/><text x="172" y="122.0" class="tag">quantity</text><line x1="315.0" y1="150.0" x2="350" y2="150.0" stroke="#1a6b8f" stroke-width="2" marker-end="url(#arrow-blue)"/><text x="318.0" y="122.0" class="tag" fill="#1a6b8f">free_param</text><text x="260.0" y="225.0" text-anchor="middle" class="tag">residual: sensor[quantity] - value == 0</text></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Creator: CorelDRAW 2026 (Evaluation Version) -->
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="12.4246mm" height="9.871mm" version="1.1" style="shape-rendering:geometricPrecision; text-rendering:geometricPrecision; image-rendering:optimizeQuality; fill-rule:evenodd; clip-rule:evenodd"
+viewBox="0 0 1242.46 987.1"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:xodm="http://www.corel.com/coreldraw/odm/2003">
+ <defs>
+  <font id="FontID0" horiz-adv-x="666" font-variant="normal" style="fill-rule:nonzero" font-weight="400">
+	<font-face 
+		font-family="Helvetica">
+		<font-face-src>
+			<font-face-name name="Helvetica"/>
+		</font-face-src>
+	</font-face>
+   <missing-glyph><path d="M0 0z"/></missing-glyph>
+   <glyph unicode="C" horiz-adv-x="722" d="M378.003 737.014c90.9928,0 162.001,-2.40238e+001 211.998,-7.20006e+001 49.9965,-4.80122e+001 77.9888,-1.02013e+002 82.9849,-1.63029e+002l-9.39692e+001 0c-1.10198e+001,46.0279 -3.30239e+001,83.0203 -6.50202e+001,110.021 -3.19963e+001,27.0002 -7.69967e+001,40.0043 -1.35001e+002,40.0043 -6.99809e+001,0 -1.26993e+002,-2.40238e+001 -1.71001e+002,-7.40203e+001 -4.29807e+001,-4.99965e+001 -6.49848e+001,-1.26001e+002 -6.49848e+001,-2.27978e+002 0,-8.40125e+001 19.9844,-1.52009e+002 58.9965,-2.05017e+002 39.0121,-5.19807e+001 98.0086,-7.79888e+001 175.005,-7.79888e+001 72.0006,0 126.993,27.0002 163.986,81.9928 20.0198,29.0199 35.0081,67.0045 44.0082,115.017l94.9968 0c-8.00794e+000,-7.60045e+001 -3.60003e+001,-1.39005e+002 -8.40125e+001,-1.90029e+002 -5.69768e+001,-6.19729e+001 -1.33973e+002,-9.29771e+001 -2.29998e+002,-9.29771e+001 -8.3977e+001,0 -1.53993e+002,26.0081 -2.09978e+002,76.0045 -7.50124e+001,67.0045 -1.12005e+002,169.974 -1.12005e+002,308.979 0,106.017 27.9923,193.005 83.977,260.01 60.0241,73.9848 144.001,111.013 250.018,111.013z"/>
+   <glyph unicode="I" horiz-adv-x="277" d="M98.0086 716.994l98.0086 0 0 -7.16994e+002 -9.80086e+001 0 0 716.994z"/>
+  </font>
+  <style type="text/css">
+   <![CDATA[
+    @font-face { font-family:"Helvetica";font-variant:normal;font-weight:normal;src:url("#FontID0") format(svg)}
+    .str1 {stroke:#3F4096;stroke-width:20;stroke-miterlimit:22.9256}
+    .str0 {stroke:#3F4096;stroke-width:10;stroke-miterlimit:22.9256}
+    .fil0 {fill:none}
+    .fil1 {fill:#3F4096}
+    .fnt0 {font-weight:normal;font-size:282.22px;font-family:'Helvetica'}
+   ]]>
+  </style>
+ </defs>
+ <g id="Layer_x0020_1">
+  <metadata id="CorelCorpID_0Corel-Layer"/>
+  <rect class="fil0 str0" x="78.82" y="10.01" width="1065.2" height="967.1"/>
+  <polyline class="fil0 str1" points="1146.63,564.75 1220.07,513.91 1146.63,463.07 "/>
+  <polyline class="fil0 str1" points="0.85,564.75 74.29,513.91 0.85,463.07 "/>
+  <g transform="matrix(1 0 0 1 -1.774E+001 101.37)">
+   <text x="480.12" y="493.55"  class="fil1 fnt0">IC</text>
+  </g>
+ </g>
+</svg>

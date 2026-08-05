@@ -1,6 +1,6 @@
 # ThermalMass
 
-<img src="../../_static/diagrams/thermal_mass.svg" alt="ThermalMass diagram" style="max-width:100%">
+<img src="../../_static/diagrams/thermal_mass.svg" alt="ThermalMass diagram" class="component-diagram">
 
 A solid's own temperature as time-integrated state (a casing, a shaft
 segment, ...) — the node any [`Convection`](convection.md)/[`Conduction`](conduction.md)/

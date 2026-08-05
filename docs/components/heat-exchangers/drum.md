@@ -1,6 +1,6 @@
 # Drum
 
-<img src="../../_static/diagrams/drum.svg" alt="Drum diagram" style="max-width:100%">
+<img src="../../_static/diagrams/drum.svg" alt="Drum diagram" class="component-diagram">
 
 A steam drum: a constant-volume, two-phase reservoir at saturation, with
 genuine liquid-level dynamics — a boiler's steam/water separator.

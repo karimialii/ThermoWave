@@ -105,6 +105,20 @@ def test_pid_step_derivative_uses_error_change_over_dt():
     assert math.isclose(pid.output, 59600.0, rel_tol=1e-9)
 
 
+def test_pid_step_derivative_ignores_a_setpoint_step_with_constant_measurement():
+    """Derivative-on-measurement (not derivative-on-error): a step change in
+    self.setpoint with the *measurement* unchanged between calls must not
+    inject a derivative kick into output, since the plant hasn't actually
+    moved -- only what we're asking of it has.
+    """
+    pid, comp, sensor = _make_pid(Kp=0.0, Ki=0.0, Kd=5.0)
+    state = _temp_state(AIR, "s1.tap", P=300000.0, T=420.0)  # measured = 420, constant
+    pid.step(state, dt=0.1)
+    pid.setpoint = 400.0  # a step change in the command, not the plant
+    new_output = pid.step(state, dt=0.1)
+    assert math.isclose(new_output, pid.bias, abs_tol=1e-9)
+
+
 def test_pid_step_clamps_output_and_stops_integral_windup_when_saturated():
     pid, comp, sensor = _make_pid(Kp=0.0, Ki=1000.0, Kd=0.0, output_min=59000.0, output_max=61000.0)
     state = _temp_state(AIR, "s1.tap", P=300000.0, T=430.0)  # error = -10
@@ -219,7 +233,7 @@ def test_pid_reset_clears_integral_windup_and_previous_error():
     assert pid.output == 60000.0
     assert pid.bias == 60000.0
     assert pid._integral == 0.0
-    assert pid._prev_error is None
+    assert pid._prev_measured is None
     # And a fresh step behaves like the very first one again.
     pid.step(state, dt=1.0)
     assert math.isclose(pid.output, 60000.0 + 1000.0 * -10.0, rel_tol=1e-9)

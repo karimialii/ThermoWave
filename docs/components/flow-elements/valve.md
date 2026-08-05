@@ -1,6 +1,6 @@
 # Valve
 
-<img src="../../_static/diagrams/valve.svg" alt="Valve diagram" style="max-width:100%">
+<img src="../../_static/diagrams/valve.svg" alt="Valve diagram" class="component-diagram">
 
 A flow-restriction pressure drop via a loss coefficient `K`. Throttling is
 isenthalpic (no work, no heat exchange).

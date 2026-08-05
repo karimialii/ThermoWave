@@ -1,0 +1,23 @@
+/* Component diagrams: centered, uniform display box regardless of each
+   SVG's own intrinsic size/aspect ratio -- these diagrams declare their
+   own tiny physical (mm-based) intrinsic dimensions, and range from
+   short/wide pipes to tall/narrow turbines. max-width/max-height alone
+   only ever shrinks an oversized image, never enlarges an undersized one,
+   which is why these rendered tiny by default. object-fit: contain on a
+   fixed-size box scales every image (up or down) to fill whichever
+   dimension is its limiting one, without distorting it, so the whole page
+   reads as one consistent set of icons instead of the browser's default
+   top-left, natural-size <img> layout. */
+.component-diagram {
+    display: block;
+    margin: 1.5em auto;
+    width: min(90%, 320px);
+    height: 220px;
+    object-fit: contain;
+}
+
+@media (max-width: 480px) {
+    .component-diagram {
+        height: 160px;
+    }
+}

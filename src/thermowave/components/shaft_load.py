@@ -62,6 +62,10 @@ class ShaftLoad(BaseComponent):
     def provided_signal_values(self, state: "NetworkState") -> dict[str, float]:
         return {self._power_port: self.power / self.efficiency}
 
+    def shaft_sign(self) -> float:
+        return -1.0  # draws power from the shaft (its own docstring:
+        # report_metrics()["power [W]"] is positive for a draw)
+
     def report_category(self) -> str:
         return "shaft_load"
 

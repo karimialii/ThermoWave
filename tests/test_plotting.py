@@ -41,8 +41,6 @@ def _build_turboshaft(N0: float, inertia: float = 0.05):
     network.connect(turb, "out", snk, "in")
     network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
     network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
-    network.connect(shaft, "p0", comp, "power", kind="signal")
-    network.connect(shaft, "p1", turb, "power", kind="signal")
     return network, comp, turb, shaft
 
 

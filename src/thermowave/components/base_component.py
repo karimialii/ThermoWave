@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from thermowave.core.network import NetworkState
+    from thermowave.core.network import Network, NetworkState
     from thermowave.fluids.base_fluid import BaseFluid
 
 
@@ -390,6 +390,54 @@ class BaseComponent(ABC):
         reads this. Default: none.
         """
         return []
+
+    def on_connected(
+        self,
+        port_name: str,
+        kind: str,
+        other: "BaseComponent",
+        other_port: str,
+        network: "Network",
+    ) -> None:
+        """Called by Network.connect() on both endpoints right after it
+        successfully wires port_name (this component's own) to other_port
+        (on `other`), naming the connection kind ("flow"/"mechanical"/
+        "signal") and giving access to `network` for making further
+        connect() calls of its own in response.
+
+        Default: does nothing -- the overwhelming majority of components
+        have no reason to react to being connected. The one built-in use is
+        Shaft: connecting a member's "shaft" mechanical port pulls that
+        same member's "power" signal port along with it automatically (see
+        Shaft.on_connected()), so a Turbine/Compressor/Generator/... needs
+        exactly one connect() call, not two, to be fully wired onto a
+        shaft -- speed and power aren't a separate wire in the real
+        machine either, so they shouldn't need to be a separate call here.
+
+        Any connect() calls made from inside an override fire this same
+        hook again for their own endpoints; guard on `kind` (as Shaft does)
+        to avoid an override reacting to its own follow-up connection.
+        """
+        return None
+
+    def shaft_sign(self) -> float | None:
+        """This component's default sign for Shaft's power balance: +1.0
+        for a component that delivers power to a shaft it's mounted on
+        (Turbine, ElectricMotor), -1.0 for one that draws power from it
+        (Compressor, Pump, Generator, ShaftLoad), or None (the default,
+        for anything not shaft-mountable, or where there genuinely isn't
+        one fixed answer) meaning Shaft's own `signs` must be given
+        explicitly for this member.
+
+        This is a fixed property of the component *class*, not a per
+        instance choice: it's already baked into how each class computes
+        its own report_metrics()["power [W]"] (e.g. Turbine's mdot*(h_in-
+        h_out) is positive exactly when it's delivering power). Shaft reads
+        this to default `signs` when not given explicitly; pass `signs=`
+        yourself to override it for a genuine edge case (a motor running
+        in regenerative/generator mode, a compressor being back-driven).
+        """
+        return None
 
     def report_metrics(self, state: "NetworkState") -> dict[str, float] | None:
         """Performance metrics (power, efficiency, pressure ratio, ...) for the

@@ -1,6 +1,6 @@
 # CheckValve
 
-<img src="../../_static/diagrams/check_valve.svg" alt="CheckValve diagram" style="max-width:100%">
+<img src="../../_static/diagrams/check_valve.svg" alt="CheckValve diagram" class="component-diagram">
 
 A one-way variant of [`Valve`](valve.md): forward flow behaves identically,
 reverse flow sees a much stiffer resistance — a real boundary condition

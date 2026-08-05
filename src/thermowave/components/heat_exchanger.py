@@ -133,10 +133,10 @@ class HeatExchanger(BaseComponent):
                 f"(fixed-effectiveness mode) or UA (NTU/geometry mode), not both "
                 f"and not neither (got effectiveness={effectiveness!r}, UA={UA!r})"
             )
-        if PR_hot <= 0:
-            raise ValueError(f"HeatExchanger {name!r}: PR_hot must be > 0, got {PR_hot}")
-        if PR_cold <= 0:
-            raise ValueError(f"HeatExchanger {name!r}: PR_cold must be > 0, got {PR_cold}")
+        if not (0.0 < PR_hot <= 1.0):
+            raise ValueError(f"HeatExchanger {name!r}: PR_hot must be in (0, 1], got {PR_hot}")
+        if not (0.0 < PR_cold <= 1.0):
+            raise ValueError(f"HeatExchanger {name!r}: PR_cold must be in (0, 1], got {PR_cold}")
 
         if effectiveness is not None:
             if not (0.0 <= effectiveness <= 1.0):

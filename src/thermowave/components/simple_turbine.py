@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
 from thermowave.components.heat_transfer import heat_loss_watts
+from thermowave.core.constants import MDOT_FLOOR
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -79,7 +80,7 @@ class SimpleTurbine(BaseComponent):
         Q_loss = heat_loss_watts(self.heat_path, state)
 
         momentum_residual = P_in - self.PR * P_out
-        energy_residual = h_out - (h_in - dh_actual) + Q_loss / mdot_in
+        energy_residual = h_out - (h_in - dh_actual) + Q_loss / max(mdot_in, MDOT_FLOOR)
         mass_residual = state.mdot(self._outlet_node) - mdot_in
         return [momentum_residual, energy_residual, mass_residual]
 

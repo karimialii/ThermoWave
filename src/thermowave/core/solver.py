@@ -237,7 +237,12 @@ def newton_solve(
         Only the final, most-conservative attempt (use_trial <= damping)
         re-raises it, since there's nothing smaller left to fall back to
         *within this call* -- the caller's rollback-to-last-known-good-point
-        handling (below) takes over from there.
+        handling (below) takes over from there. A non-finite (NaN/inf)
+        residual_norm gets the identical treatment (raising the same
+        FluidRangeError at the last resort) even though residual_fn didn't
+        raise anything itself -- `norm_trial <= norm_from` is always False
+        for NaN, so without this it would otherwise slip past the "back off"
+        check and get force-accepted by `use_trial <= damping` alone.
         """
         trial = start_ceiling
         backed_off = False
@@ -255,6 +260,23 @@ def newton_solve(
                 backed_off = True
                 continue
             norm_trial = float(np.linalg.norm(F_trial))
+            if not np.isfinite(norm_trial):
+                # A non-finite residual (e.g. a domain error like sqrt of a
+                # negative intermediate that numpy warns on rather than
+                # raises) carries no information about whether this trial
+                # is better or worse -- accepting it here on the strength
+                # of `use_trial <= damping` alone (NaN comparisons are
+                # always False, so the norm_trial <= norm_from check can
+                # never reject it) would poison every iteration downstream.
+                # Route it through the exact same "this point was
+                # untenable" recovery FluidRangeError already gets below.
+                if use_trial <= damping:
+                    raise FluidRangeError(
+                        f"residual_fn returned a non-finite residual at x={x_trial}"
+                    )
+                trial *= 0.5
+                backed_off = True
+                continue
             if norm_trial <= norm_from or use_trial <= damping:
                 break
             trial *= 0.5

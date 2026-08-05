@@ -2,9 +2,29 @@ import math
 
 import pytest
 
-from thermowave.maps.characteristic_map import CharacteristicMap
+from thermowave.maps.characteristic_map import CharacteristicMap, _SpeedLine
 
 _MAP_PATH = "tests/fixtures/simple_compressor_map.cop"
+
+
+def test_speed_line_rejects_non_ascending_mass_flow():
+    # _interpolate_1d's own np.interp call (and its b[0]/b[-1] clamp
+    # bounds) silently assumes mass_flow is ascending and never checks it
+    # -- a malformed map file (data-entry error, or a vendor format quirk)
+    # should be caught here, at the one place that still has the raw row,
+    # rather than silently producing wrong interpolated values downstream.
+    with pytest.raises(ValueError, match="strictly increasing"):
+        _SpeedLine(speed=100.0, mass_flow=[1.0, 3.0, 2.0], value=[0.9, 0.8, 0.7])
+
+
+def test_speed_line_rejects_duplicate_mass_flow_values():
+    with pytest.raises(ValueError, match="strictly increasing"):
+        _SpeedLine(speed=100.0, mass_flow=[1.0, 2.0, 2.0], value=[0.9, 0.8, 0.7])
+
+
+def test_speed_line_accepts_strictly_ascending_mass_flow():
+    line = _SpeedLine(speed=100.0, mass_flow=[1.0, 2.0, 3.0], value=[0.9, 0.8, 0.7])
+    assert line.mass_flow == [1.0, 2.0, 3.0]
 
 
 def test_default_factors_match_from_file_with_no_overrides():

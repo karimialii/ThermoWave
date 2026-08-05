@@ -1,6 +1,6 @@
 # Source
 
-<img src="../../_static/diagrams/source.svg" alt="Source diagram" style="max-width:100%">
+<img src="../../_static/diagrams/source.svg" alt="Source diagram" class="component-diagram">
 
 A boundary condition fixing outlet pressure and temperature, and (usually)
 mass flow rate.

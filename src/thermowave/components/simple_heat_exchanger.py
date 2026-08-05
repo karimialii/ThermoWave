@@ -34,8 +34,8 @@ class SimpleHeatExchanger(BaseComponent):
     """
 
     def __init__(self, name: str, Q: float | None, PR: float = 1.0):
-        if PR <= 0:
-            raise ValueError(f"SimpleHeatExchanger {name!r}: PR must be > 0, got {PR}")
+        if not (0.0 < PR <= 1.0):
+            raise ValueError(f"SimpleHeatExchanger {name!r}: PR must be in (0, 1], got {PR}")
         self.name = name
         self.Q = Q
         self.PR = PR

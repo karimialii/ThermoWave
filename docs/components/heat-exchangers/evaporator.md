@@ -1,11 +1,19 @@
 # Evaporator
 
-<img src="../../_static/diagrams/evaporator.svg" alt="Evaporator diagram" style="max-width:100%">
+<img src="../../_static/diagrams/evaporator.svg" alt="Evaporator diagram" class="component-diagram">
 
-Two-stream phase-change equipment: a boiling working fluid (`wf`) coupled
-to an explicit single-phase heat-source stream. Duty comes from the `wf`
-outlet spec, **never** an effectiveness/UA calculation (`cp` is effectively
-infinite during phase change).
+Two variants: [`Evaporator`](#evaporator-two-stream) couples the boiling
+working fluid to an explicit heat-source stream, and
+[`SimpleEvaporator`](#simpleevaporator-single-stream) hits the same outlet
+condition without modeling the heat source. Both are phase-change
+equipment: duty always comes from the outlet spec, **never** an
+effectiveness/UA calculation (`cp` is effectively infinite during phase
+change).
+
+## `Evaporator` (two-stream)
+
+A boiling working fluid (`wf`) coupled to an explicit single-phase
+heat-source stream.
 
 **Ports:** `wf_in`, `wf_out`, `src_in`, `src_out` &nbsp;·&nbsp;
 **Parameters:** `PR_wf`, `PR_src`, `outlet_quality` (default 1.0 =
@@ -29,9 +37,26 @@ exposes `pinch [K]` `= T_src_out - T_sat(P_wf_out)`. A negative pinch means
 the source would have to end up colder than the boiling fluid — a
 thermodynamically infeasible spec, not a solver bug.
 
-For the same physics without modeling the heat-source stream explicitly,
-see [`SimpleEvaporator`](simple-evaporator.md); for the condensing
-counterpart, see [`Condenser`](condenser.md).
+For the condensing counterpart, see [`Condenser`](condenser.md).
+
+## `SimpleEvaporator` (single-stream)
+
+<img src="../../_static/diagrams/simple_evaporator.svg" alt="SimpleEvaporator diagram" class="component-diagram">
+
+Single-stream evaporator/boiler/superheater: adds heat to hit a specified
+outlet condition without modeling the heat-source stream explicitly (the
+phase-change analogue of [`SimpleCombustor`](../combustion/combustor.md)).
+
+**Ports:** `in`, `out` &nbsp;·&nbsp; **Parameters:** `PR` (default 1.0),
+`outlet_quality` (default 1.0 = saturated vapor), `superheat` (K above
+saturation), `duty` (optional — fix heat directly instead of an outlet
+spec)
+
+- **Outlet-spec mode** (default, `duty=None`): outlet pinned to
+  `outlet_quality`/`superheat` (same targets as `Evaporator` above);
+  `Q = mdot * (h_out - h_in)` is a *reported* result.
+- **Duty mode** (`duty` given, `[W]`): `h_out = h_in + duty/mdot`; the
+  resulting outlet quality/superheat is reported instead.
 
 ---
 Part of [Heat exchangers & phase change](index.md).

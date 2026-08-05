@@ -1,6 +1,6 @@
 # PIDController
 
-<img src="../../_static/diagrams/pid_controller.svg" alt="PIDController diagram" style="max-width:100%">
+<img src="../../_static/diagrams/pid_controller.svg" alt="PIDController diagram" class="component-diagram">
 
 The finite-response, time-domain counterpart to [`Controller`](controller.md),
 for use inside `Network.solve_transient()`.

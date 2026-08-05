@@ -250,8 +250,6 @@ def test_check_wiring_recognises_a_shaft_as_closing_its_members_speeds():
     network.connect(turb, "out", snk, "in")
     network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
     network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
-    network.connect(shaft, "p0", comp, "power", kind="signal")
-    network.connect(shaft, "p1", turb, "power", kind="signal")
 
     assert network.check_wiring() == []
 

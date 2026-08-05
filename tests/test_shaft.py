@@ -59,6 +59,9 @@ class _FakeShaftComponent:
     def provided_signal_values(self, state):
         return {} if self._power is None else {self._power_port: self._power}
 
+    def shaft_sign(self):
+        return 1.0
+
 
 def _free_pair():
     comp = Compressor(name="c1", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
@@ -103,6 +106,33 @@ def test_raises_if_any_component_free_param_not_declared_free():
     other = _FakeShaftComponent("b", has_shaft=False)
     with pytest.raises(ValueError, match="needs at least .* member"):
         Shaft(name="shaft", members=[comp, other])
+
+
+def test_signs_are_inferred_from_member_shaft_sign_when_omitted():
+    comp, turb = _free_pair()  # real Compressor/Turbine: -1.0 / +1.0
+    shaft = Shaft(name="shaft", members=[turb, comp])
+    assert shaft.signs == [1.0, -1.0]
+
+
+def test_explicit_signs_still_override_the_inferred_default():
+    comp, turb = _free_pair()
+    shaft = Shaft(name="shaft", members=[turb, comp], signs=[-1.0, -1.0])
+    assert shaft.signs == [-1.0, -1.0]
+
+
+def test_signs_omitted_raises_a_clear_error_for_a_member_with_no_default():
+    # _FakeShaftComponent's shaft_sign() defaults to 1.0, so build one that
+    # explicitly has none (mirrors a real custom component type that never
+    # overrode shaft_sign()) to prove the error names it, rather than
+    # crashing or silently guessing.
+    class _NoDefaultSign(_FakeShaftComponent):
+        def shaft_sign(self):
+            return None
+
+    comp, _turb = _free_pair()
+    no_default = _NoDefaultSign("mystery")
+    with pytest.raises(ValueError, match=r"can't infer signs for \['mystery'\]"):
+        Shaft(name="shaft", members=[comp, no_default])
 
 
 def test_raises_if_gear_ratios_length_mismatched():
@@ -190,15 +220,119 @@ def test_shaft_end_to_end_locks_compressor_and_turbine_speed():
     network.connect(heater, "out", turb, "in")
     network.connect(turb, "out", turb_outlet_sensor, "tap")
     network.connect(turb, "out", snk, "in")
+    # Connecting each member's mechanical "shaft" port pulls its "power"
+    # signal port in automatically (Shaft.on_connected()) -- no separate
+    # kind="signal" connect() needed for comp/turb.
     network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
     network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
-    network.connect(shaft, "p0", comp, "power", kind="signal")
-    network.connect(shaft, "p1", turb, "power", kind="signal")
 
     result = network.solve(tol=1e-8, max_iter=400, damping=0.3)
     assert math.isclose(result.node_N["comp.shaft"], result.node_N["turb.shaft"], rel_tol=1e-6)
     T_out = AIR.temperature_ph(result.node_P["turb.out"], result.node_h["turb.out"])
     assert math.isclose(T_out, target_T, abs_tol=1e-3)
+
+
+def test_mechanical_connect_alone_wires_power_automatically():
+    # The whole point of on_connected(): one connect(kind="mechanical")
+    # call is enough, no separate signal connect(), and the network still
+    # solves and reports power correctly.
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
+    heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-100000.0)
+    turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
+    shaft = Shaft(name="shaft", members=[comp, turb], signs=[-1.0, 1.0])
+    src = Source(name="src", P=101325.0, T=288.15, mdot=0.63)
+    snk = Sink(name="snk")
+
+    turb_outlet_sensor = Sensor(name="turb_outlet_sensor")
+    ctrl = Controller(
+        name="ctrl", sensor=turb_outlet_sensor, quantity="T [K]", component=comp,
+        free_param="shaft", value=500.0,
+    )
+
+    network = Network(fluid=AIR)
+    for component in (src, comp, heater, turb, shaft, turb_outlet_sensor, ctrl, snk):
+        network.add_component(component)
+
+    network.connect(src, "out", comp, "in")
+    network.connect(comp, "out", heater, "in")
+    network.connect(heater, "out", turb, "in")
+    network.connect(turb, "out", turb_outlet_sensor, "tap")
+    network.connect(turb, "out", snk, "in")
+    network.connect(shaft, "m0", comp, "shaft", kind="mechanical")
+    network.connect(shaft, "m1", turb, "shaft", kind="mechanical")
+
+    kinds = {(c.from_component.name, c.from_port, c.kind) for c in network.connections}
+    assert ("shaft", "p0", "signal") in kinds
+    assert ("shaft", "p1", "signal") in kinds
+
+    result = network.solve(tol=1e-8, max_iter=400, damping=0.3)
+    metrics = shaft.report_metrics(result.state())
+    assert math.isfinite(metrics["power [W]"])
+
+
+def test_autowire_makes_the_same_connections_as_the_manual_pattern():
+    # Same network as test_shaft_end_to_end_locks_compressor_and_turbine_speed
+    # above, but using shaft.autowire(network) in place of the four explicit
+    # network.connect(shaft, "m0"/"m1"/"p0"/"p1", ..., kind=...) calls --
+    # should converge to the identical result.
+    src = Source(name="src", P=101325.0, T=288.15, mdot=0.63)
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=None)
+    heater = Pipe(name="heater", L=1.0, D=0.1, f=0.0, n_elem=1, heat_loss=-100000.0)
+    turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=None)
+    shaft = Shaft(name="shaft", members=[comp, turb], signs=[-1.0, 1.0], efficiency=0.98)
+    snk = Sink(name="snk")
+
+    turb_outlet_sensor = Sensor(name="turb_outlet_sensor")
+    target_T = 500.0
+    ctrl = Controller(
+        name="ctrl",
+        sensor=turb_outlet_sensor,
+        quantity="T [K]",
+        component=comp,
+        free_param="shaft",
+        value=target_T,
+    )
+
+    network = Network(fluid=AIR)
+    for component in (src, comp, heater, turb, shaft, turb_outlet_sensor, ctrl, snk):
+        network.add_component(component)
+
+    network.connect(src, "out", comp, "in")
+    network.connect(comp, "out", heater, "in")
+    network.connect(heater, "out", turb, "in")
+    network.connect(turb, "out", turb_outlet_sensor, "tap")
+    network.connect(turb, "out", snk, "in")
+    shaft.autowire(network)
+
+    result = network.solve(tol=1e-8, max_iter=400, damping=0.3)
+    assert math.isclose(result.node_N["comp.shaft"], result.node_N["turb.shaft"], rel_tol=1e-6)
+    T_out = AIR.temperature_ph(result.node_P["turb.out"], result.node_h["turb.out"])
+    assert math.isclose(T_out, target_T, abs_tol=1e-3)
+
+
+def test_autowire_skips_mechanical_port_for_torque_only_members():
+    # ShaftLoad has no "shaft" mechanical port -- autowire must not try to
+    # connect one for it (that would raise NetworkTopologyError), only the
+    # signal port, exactly like the manual pattern in the class docstring.
+    from thermowave.components.shaft_load import ShaftLoad
+
+    comp = Compressor(name="comp", map_path="tests/fixtures/simple_compressor_map.cop", gamma=GAMMA, N=50000.0)
+    turb = Turbine(name="turb", map_path="tests/fixtures/simple_turbine_map.tur", gamma=GAMMA, N=50000.0)
+    load = ShaftLoad(name="load", power=1000.0)
+    shaft = Shaft(name="shaft", members=[comp, turb, load], signs=[-1.0, 1.0, -1.0])
+
+    network = Network(fluid=AIR)
+    for component in (comp, turb, load, shaft):
+        network.add_component(component)
+    shaft.autowire(network)
+
+    kinds = {(c.from_component.name, c.from_port, c.kind) for c in network.connections}
+    assert ("shaft", "m0", "mechanical") in kinds
+    assert ("shaft", "m1", "mechanical") in kinds
+    assert ("shaft", "p0", "signal") in kinds
+    assert ("shaft", "p1", "signal") in kinds
+    assert ("shaft", "p2", "signal") in kinds
+    assert not any(port.startswith("m2") for _, port, _ in kinds)
 
 
 def test_dynamic_shaft_declares_no_differential_state_by_default():

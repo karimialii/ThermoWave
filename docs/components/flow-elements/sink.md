@@ -1,6 +1,6 @@
 # Sink
 
-<img src="../../_static/diagrams/sink.svg" alt="Sink diagram" style="max-width:100%">
+<img src="../../_static/diagrams/sink.svg" alt="Sink diagram" class="component-diagram">
 
 An open boundary terminating a network branch.
 

@@ -1,6 +1,6 @@
 # Pump
 
-<img src="../../_static/diagrams/pump.svg" alt="Pump diagram" style="max-width:100%">
+<img src="../../_static/diagrams/pump.svg" alt="Pump diagram" class="component-diagram">
 
 Liquid pump: raises pressure with a small enthalpy rise via an
 entropy-based isentropic path scaled by efficiency — the liquid counterpart

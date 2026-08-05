@@ -43,6 +43,7 @@ the caller-facing summary of each):
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -208,14 +209,14 @@ def _cost_component(
         E_out = _E_PH(state, ports["out"], T0, P0)
         E_F = E_in - E_out
         E_P = component.report_metrics(state)["power [W]"]
-        return _finish_cost(E_F, E_P)
+        return _finish_cost(E_F, E_P, component.name)
 
     if isinstance(component, _COMPRESSION):
         E_F = component.report_metrics(state)["power [W]"]
         E_in = _E_PH(state, ports["in"], T0, P0)
         E_out = _E_PH(state, ports["out"], T0, P0)
         E_P = E_out - E_in
-        return _finish_cost(E_F, E_P)
+        return _finish_cost(E_F, E_P, component.name)
 
     if isinstance(component, _TWO_STREAM_HX):
         E_hot_in = _E_PH(state, ports["hot_in"], T0, P0)
@@ -226,7 +227,7 @@ def _cost_component(
         E_cold_in = _E_PH(state, ports["cold_in"], T0, P0)
         E_cold_out = _E_PH(state, ports["cold_out"], T0, P0)
         E_P = E_cold_out - E_cold_in
-        return _finish_cost(E_F, E_P)
+        return _finish_cost(E_F, E_P, component.name)
 
     if isinstance(component, _POWER_ONLY):
         # No flow ports, hence no exergy of their own to speak of -- their
@@ -253,13 +254,27 @@ def _cost_component(
         E_in = _E_PH(state, ports["in"], T0, P0)
         E_out = _E_PH(state, ports["out"], T0, P0)
         E_P = E_out - E_in
-        return _finish_cost(E_F, E_P)
+        return _finish_cost(E_F, E_P, component.name)
 
     return None
 
 
-def _finish_cost(E_F: float, E_P: float) -> ComponentExergyCost:
+def _finish_cost(E_F: float, E_P: float, name: str = "") -> ComponentExergyCost:
     E_D = E_F - E_P
+    if E_D < 0.0:
+        # Exergy destruction is only ever >= 0 by the second law -- a
+        # negative value here means the fuel/product split fed in is
+        # nonphysical (most likely an inconsistent power-sign convention
+        # upstream), not a real result. Surfacing it as a warning rather
+        # than raising: this function only *reports* on an
+        # already-converged solve, and the caller may still want the rest
+        # of the exergy report even with one bad row in it.
+        warnings.warn(
+            f"{name or 'component'!r}: negative exergy destruction "
+            f"(E_D={E_D:.3g} W) is physically impossible -- check upstream "
+            "power-sign conventions",
+            stacklevel=3,
+        )
     epsilon = E_P / E_F if abs(E_F) > 1e-9 else None
     return ComponentExergyCost(E_F=E_F, E_P=E_P, E_D=E_D, epsilon=epsilon)
 

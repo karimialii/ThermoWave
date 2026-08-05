@@ -1,6 +1,6 @@
 # Sensor
 
-<img src="../../_static/diagrams/sensor.svg" alt="Sensor diagram" style="max-width:100%">
+<img src="../../_static/diagrams/sensor.svg" alt="Sensor diagram" class="component-diagram">
 
 A passive measurement tap on a network node. Connect it to whatever node you
 want to read — it merges into that existing node rather than creating a new

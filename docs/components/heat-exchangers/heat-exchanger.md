@@ -1,11 +1,18 @@
 # HeatExchanger
 
-<img src="../../_static/diagrams/heat_exchanger.svg" alt="HeatExchanger diagram" style="max-width:100%">
+<img src="../../_static/diagrams/heat_exchanger.svg" alt="HeatExchanger diagram" class="component-diagram">
 
-Two-stream heat exchanger: fixed effectiveness, or effectiveness derived
-from geometry (`UA`, flow arrangement) — auto-selected by which one you
-give. Give exactly one of `effectiveness` or `UA`; passing both, or
-neither, raises `ValueError`.
+Two variants: [`HeatExchanger`](#heatexchanger-two-stream) is a two-stream
+exchanger (hot side transferring heat to a cold side), and
+[`SimpleHeatExchanger`](#simpleheatexchanger-single-stream) is a
+single-stream, `Q`-driven heater/cooler for when there's no second stream
+to model at all.
+
+## `HeatExchanger` (two-stream)
+
+Fixed effectiveness, or effectiveness derived from geometry (`UA`, flow
+arrangement) — auto-selected by which one you give. Give exactly one of
+`effectiveness` or `UA`; passing both, or neither, raises `ValueError`.
 
 **Ports:** `hot_in`, `hot_out`, `cold_in`, `cold_out` &nbsp;·&nbsp;
 **Parameters:** `PR_hot`, `PR_cold`, plus one of:
@@ -14,7 +21,7 @@ neither, raises `ValueError`.
   `"parallel"` / `"crossflow"` / `"shell_and_tube"` / `"custom"`),
   `correlation` (required iff `arrangement="custom"`) — UA/NTU mode
 
-## Fixed-effectiveness mode (`effectiveness=...`)
+### Fixed-effectiveness mode (`effectiveness=...`)
 
 A datasheet or an existing exchanger's known performance rating:
 
@@ -40,7 +47,7 @@ $$
 clamped to `≥ 0` — a network wired with the "hot" side actually colder than
 the "cold" side just yields negative `Q` (heat flowing the other way).
 
-## UA/NTU mode (`UA=...`)
+### UA/NTU mode (`UA=...`)
 
 Effectiveness comes from the standard effectiveness-NTU relations instead
 of being a direct input:
@@ -81,25 +88,61 @@ converging toward the true counterflow limit.
 `"custom"` plugs in your own `correlation(NTU, Cr) -> effectiveness`
 callable for a plate-fin/finned-tube/vendor correlation.
 
-## `MultiPassHeatExchanger`
-
-`MultiPassHeatExchanger(name, UA, PR_hot, PR_cold, n_passes=1,
-arrangement="counterflow", correlation=None)` is a thin subclass of
-`HeatExchanger` that always uses UA/NTU mode — no math is duplicated, it
-just forwards to `HeatExchanger.__init__(..., UA=UA, ...)`. Use it when you
-want that guarantee at the type level (e.g. an `isinstance()` check, or
-just to make "this exchanger's rating comes from geometry, not a given
-effectiveness" explicit at the call site); otherwise `HeatExchanger(UA=...)`
-is equivalent.
-
 Both single-fluid and dual-fluid streams share the network's single fluid
 model (no distinct hot/cold fluid types yet — same limitation as every
 other component here). Both side's pressure drop is a simple fixed ratio
 (not a K-factor loss model); in UA/staged mode it's split evenly in log
 space across passes.
 
-For a single-stream, `Q`-driven heater/cooler (no second stream at all),
-see [`SimpleHeatExchanger`](simple-heat-exchanger.md).
+### `MultiPassHeatExchanger`
+
+<img src="../../_static/diagrams/multi_pass_heat_exchanger.svg" alt="MultiPassHeatExchanger diagram" class="component-diagram">
+
+A thin, always-UA/NTU-mode subclass of `HeatExchanger` — its constructor
+(`MultiPassHeatExchanger(name, UA, PR_hot, PR_cold, n_passes=1,
+arrangement=..., correlation=None)`) just forwards to
+`HeatExchanger.__init__(..., UA=UA, ...)`, so no math is duplicated between
+the two classes; everything above (effectiveness-NTU relations,
+`n_passes`, `arrangement`, `shell_and_tube`'s F-correction, `custom`
+correlations) applies unchanged.
+
+**Ports:** `hot_in`, `hot_out`, `cold_in`, `cold_out` &nbsp;·&nbsp;
+**Parameters:** `UA`, `PR_hot`, `PR_cold`, `n_passes` (default 1),
+`arrangement`, `correlation` (required iff `arrangement="custom"`)
+
+`HeatExchanger(UA=...)` is equivalent — use `MultiPassHeatExchanger`
+directly when you want "this exchanger's rating comes from geometry, not a
+given effectiveness" explicit at the call site (or an `isinstance()`
+check).
+
+## `SimpleHeatExchanger` (single-stream)
+
+<img src="../../_static/diagrams/simple_heat_exchanger.svg" alt="SimpleHeatExchanger diagram" class="component-diagram">
+
+Single-stream heat addition/removal, 0D model: one fluid network, one duty
+`Q` — not a two-stream exchanger like the ones above. It's the "apply `Q`
+to this stream" building block, e.g. a heater/cooler/duty specified
+directly rather than derived from a second stream's own state.
+
+**Ports:** `in`, `out` &nbsp;·&nbsp;
+**Parameters:** `Q`, `PR`
+
+$$
+P_\text{out} - PR\,P_\text{in} = 0
+\qquad
+h_\text{out} - \left(h_\text{in} + \frac{Q}{\dot m}\right) = 0
+$$
+
+`Q` [W]: positive heats the fluid, negative cools it — give it directly, or
+leave it `None` to make it a free Newton unknown, closed by a
+`Setpoint`/`Controller`/`PIDController` targeting some downstream quantity
+(the same free-parameter pattern as `Combustor`'s `mdot_fuel`). Not clamped
+either way; a `Q` that drives the outlet temperature outside the fluid
+model's valid range fails the same way any other component's residuals
+would.
+
+Pressure drop is a simple fixed ratio (`P_out = PR * P_in`, same style as
+`SimpleCompressor`/`SimpleTurbine`), not a K-factor loss model.
 
 ---
 Part of [Heat exchangers & phase change](index.md).

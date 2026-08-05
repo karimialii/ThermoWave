@@ -131,6 +131,33 @@ def test_junction_residuals_does_not_raise_on_all_zero_inflow():
     assert all(math.isfinite(r) for r in residuals)
 
 
+def test_junction_residuals_bounds_h_mix_on_near_cancelling_counter_flows():
+    # mdot_total is tiny (a near-cancelling pair of large opposing flows,
+    # not a genuinely all-zero-inflow state), but sum(mdot*h) individually
+    # is large -- dividing that numerator by the floored denominator would
+    # blow h_mix up to something enormous and physically meaningless
+    # instead of a bounded placeholder for this still-undefined state.
+    P, h1, h2 = 300000.0, 1.0e6, 2.0e6
+    j = Junction(name="j1", n_inlets=2, n_outlets=1)
+
+    state = _FakeState(
+        fluid=AIR,
+        node_values={
+            "j1.in0": (P, h1),
+            "j1.in1": (P, h2),
+            "j1.out0": (P, h1),
+        },
+        mdot_values={"j1.in0": 1000.0, "j1.in1": -999.9999999, "j1.out0": 0.0},
+    )
+    residuals = j.residuals(state)
+    assert all(math.isfinite(r) for r in residuals)
+    # h_out - h_mix is the second residual; h_mix should land near the
+    # inlet enthalpies' own scale (the fallback average), not orders of
+    # magnitude beyond either of them.
+    h_mix = h1 - residuals[1]
+    assert min(h1, h2) <= h_mix <= max(h1, h2)
+
+
 def test_junction_warm_start_pairs_pairs_first_inlet_with_every_outlet():
     j = Junction(name="j1", n_inlets=2, n_outlets=3)
     assert j.warm_start_pairs() == [("in0", "out0"), ("in0", "out1"), ("in0", "out2")]

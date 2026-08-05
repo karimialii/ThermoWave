@@ -4,6 +4,49 @@ Notable changes to ThermoWave, in reverse chronological order. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to the `[project] version` in `pyproject.toml`.
 
+## 0.8.2 — 2026-08-05
+
+### Added
+
+- **`Shaft` wires power automatically.** Connecting a member's mechanical
+  `"shaft"` port (`network.connect(shaft, "m{i}", member, "shaft",
+  kind="mechanical")`) now also wires that same member's `"power"` signal
+  port to the matching `"p{i}"` — the new `BaseComponent.on_connected()`
+  hook, fired by `Network.connect()` on both endpoints of every
+  connection, with `Shaft` as its only override. A torque-only member
+  (`ShaftLoad`, no `"shaft"` mechanical port) still needs its own explicit
+  signal `connect()` call, since there's no mechanical connection to
+  piggyback on. See [`Shaft`](components/mechanical/shaft.md).
+- **`Shaft.autowire(network)`**, called once after `add_component(shaft)`,
+  makes every mechanical/signal `connect()` call a shaft's members need in
+  one go — for any member whose ports are named the usual `"shaft"`/
+  `"power"` way (every built-in rotating/electrical component already is).
+- **`BaseComponent.shaft_sign()`** — a fixed per-class default for
+  `Shaft`'s `signs`: `+1.0` (delivers power) on `Turbine`/`ElectricMotor`,
+  `-1.0` (draws power) on `Compressor`/`Generator`/`SimpleGenerator`/
+  `ShaftLoad`. `Shaft(signs=None)` (the new default) infers `signs` from
+  each member's `shaft_sign()` instead of requiring it spelled out by
+  hand; pass `signs=[...]` explicitly to override for a genuine edge case
+  (a motor running in regenerative mode, a back-driven compressor).
+  `Shaft` raises a clear error naming any member with no default
+  (`shaft_sign()` returns `None`) rather than silently guessing.
+
+### Changed
+
+- **Read the Docs redesign.** Component diagrams are now centered and
+  rendered at a consistent visual size (`docs/_static/custom.css`,
+  `object-fit: contain` on a fixed box — a plain `max-width` cap left
+  small-intrinsic-size SVGs tiny and everything left-aligned). The
+  "Simple"/full component page pairs are merged into one page per family
+  (`Compressor`+`SimpleCompressor`, `Turbine`+`SimpleTurbine`+
+  `SteamTurbine`, `HeatExchanger`+`SimpleHeatExchanger`+
+  `MultiPassHeatExchanger`, `Condenser`+`SimpleCondenser`,
+  `Evaporator`+`SimpleEvaporator`, `Combustor`+`SimpleCombustor`,
+  `Generator`+`SimpleGenerator`), each as clearly labeled sections on one
+  page instead of a separate page per variant — every navigation link and
+  cross-reference across the docs was updated to the new page/anchor
+  layout.
+
 ## 0.8.1 — 2026-08-04
 
 ### Added
@@ -59,7 +102,7 @@ correspond to the `[project] version` in `pyproject.toml`.
   fixed-effectiveness dual-fluid model. **Migration:** replace
   `SimpleHeatExchanger(effectiveness=..., PR_hot=..., PR_cold=...)` with
   `HeatExchanger(effectiveness=..., PR_hot=..., PR_cold=...)`. See
-  [`SimpleHeatExchanger`](components/heat-exchangers/simple-heat-exchanger.md).
+  [`SimpleHeatExchanger`](components/heat-exchangers/heat-exchanger.md#simpleheatexchanger-single-stream).
 - **`MultiPassHeatExchanger` moved** from
   `thermowave.components.multi_pass_heat_exchanger` to
   `thermowave.components.heat_exchanger`, where it's now a thin subclass of
