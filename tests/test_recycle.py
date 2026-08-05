@@ -7,7 +7,7 @@ from thermowave.components.recycle import Recycle  # noqa: E402
 from thermowave.components.simple_condenser import SimpleCondenser  # noqa: E402
 from thermowave.components.simple_evaporator import SimpleEvaporator  # noqa: E402
 from thermowave.components.steam_turbine import SteamTurbine  # noqa: E402
-from thermowave.core.network import Network, NetworkState  # noqa: E402
+from thermowave.core.network import Network  # noqa: E402
 from thermowave.fluids.real_fluid import CoolPropFluid  # noqa: E402
 
 WATER = CoolPropFluid(name="Water")

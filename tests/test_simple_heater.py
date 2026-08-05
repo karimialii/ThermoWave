@@ -5,7 +5,7 @@ pytest.importorskip("CoolProp")
 from thermowave.components.simple_heater import SimpleHeater  # noqa: E402
 from thermowave.components.sink import Sink  # noqa: E402
 from thermowave.components.source import Source  # noqa: E402
-from thermowave.core.network import Network, NetworkState  # noqa: E402
+from thermowave.core.network import Network  # noqa: E402
 from thermowave.fluids.real_fluid import CoolPropFluid  # noqa: E402
 
 CO2 = CoolPropFluid(name="CO2")
