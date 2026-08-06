@@ -56,13 +56,45 @@ class Drum(BaseComponent):
     density partials in state_derivative() can momentarily cross the dome
     boundary if the drum is driven to x≈0 or x≈1 — a known robustness limit.
 
-    A drum's liquid level has no steady-state restoring force: it's a pure
-    integrator (net inflow accumulates indefinitely), the same as a real
-    drum needs level control to hold a setpoint. Network.solve() is
-    therefore singular in the drum's own h — there is no algebraic level to
-    solve for. Use Network.solve_transient() instead, which integrates
-    (P, h) forward via state_derivative(), exactly the differential-state
-    mechanism every dynamic component here shares.
+    Usable in an ordinary Network.solve() (dt=None), not just
+    solve_transient(): state_derivative()==0 there reduces exactly to the
+    drum's own mass and energy balance (the same two equations a purely
+    algebraic, steady-state drum model -- e.g. TESPy's own Drum -- computes
+    directly), not something that needs the dynamic-state machinery running.
+
+    What it does NOT do on its own, in EITHER solve mode, is anchor its own
+    (P, h): a bare Drum contributes exactly 4 port-pinning residuals (P/h at
+    steam_out and water_out relative to whatever P_drum happens to be) plus
+    those 2 balance equations -- 6 equations for what works out to (once its
+    neighbors' own residuals are accounted for) one MORE free unknown than
+    that closes: 3 quantities with no natural closing equation anywhere in a
+    typical surrounding topology (this component's own pressure, and, with
+    has_riser=True, the riser recirculation mass flow) once oil/HTF mdot on
+    a coupled two-stream evaporator is ALSO left free -- traced by hand
+    while building the SEGS boiler benchmark (see segs_exergy_benchmark.py's
+    BOILER SUBSYSTEM), where neither Setpoint nor Controller can reach a raw
+    node mdot or a differential parameter to close the gap generically.
+    P_target and water_out_mdot below are the narrow, physically-grounded
+    fix: a real boiler drum IS essentially isobaric with its feed (no
+    Setpoint/Controller detour needed to say so directly), and the riser
+    recirculation ratio is a genuine design input in practice (the same
+    role TESPy's own eva.set_attr(ttd_l=5) plays) -- not something a
+    conservation-only model derives on its own regardless of the tool.
+
+    P_target [Pa]: when given, adds a 5th residual pinning the drum's own
+    differential-state pressure directly (P_drum - P_target), instead of
+    leaving it a genuinely free unknown with nothing else in a typical
+    topology to anchor it. Leave at the default None for a network that
+    already anchors this drum's pressure some other way (or for
+    solve_transient(), where dt drives P forward from P0 instead).
+
+    water_out_mdot [kg/s]: when given (has_riser=True only), adds a 6th
+    residual pinning water_out's own mass flow directly (the riser/downcomer
+    supply rate) -- the recirculation-ratio equivalent of Source's own
+    fixed mdot, for exactly the same reason Source needs one: nothing else
+    conserves mass INTO a specific numeric value on its own. Leave at the
+    default None when something else in the topology already closes it
+    (e.g. a fixed-mdot boundary on that branch) or for solve_transient().
 
     fluid is used only at construction, to convert level0 (liquid volume
     fraction, default 0.5) into an initial mass quality x0 at P0 and then
@@ -80,6 +112,8 @@ class Drum(BaseComponent):
         level0: float = 0.5,
         has_riser: bool = True,
         heat_loss: float | None = None,
+        P_target: float | None = None,
+        water_out_mdot: float | None = None,
     ):
         if V <= 0.0:
             raise ValueError(f"Drum {name!r}: V must be > 0, got {V}")
@@ -92,6 +126,8 @@ class Drum(BaseComponent):
         self.has_riser = has_riser
         self.heat_loss = heat_loss
         self.P0 = settings.pressure_to_si(P0)
+        self.P_target = None if P_target is None else settings.pressure_to_si(P_target)
+        self.water_out_mdot = water_out_mdot
 
         # Seed the differential state: convert liquid volume fraction level0
         # into a mass quality x0 at P0, then to an average enthalpy h0.
@@ -197,12 +233,17 @@ class Drum(BaseComponent):
         h_g = fluid.saturated_vapor_enthalpy(P_drum)
         h_f = fluid.saturated_liquid_enthalpy(P_drum)
 
-        return [
+        out = [
             P_steam - P_drum,
             h_steam - h_g,
             P_water - P_drum,
             h_water - h_f,
         ]
+        if self.P_target is not None:
+            out.append(P_drum - self.P_target)
+        if self.water_out_mdot is not None:
+            out.append(state.mdot(self._water_out_node) - self.water_out_mdot)
+        return out
 
     def report_metrics(self, state: "NetworkState") -> dict[str, float]:
         P = state.param(f"{self.name}.P")

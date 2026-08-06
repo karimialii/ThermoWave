@@ -4,15 +4,65 @@ import math
 from typing import TYPE_CHECKING, Callable, Optional
 
 from thermowave.components.base_component import BaseComponent
+from thermowave.core.exceptions import FluidRangeError
+from thermowave.fluids.two_phase import supports_two_phase
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
+    from thermowave.fluids.base_fluid import BaseFluid
 
 _MIN_C = 1.0e-9  # kg/s * J/(kg K), floor to avoid divide-by-zero if a side has ~0 mdot
 _C_SMOOTHING_EPS = 0.002  # kg/s * J/(kg K), smoothing width for _smooth_min's kink
 _MIN_MDOT = 1.0e-9  # kg/s, floor for the Q/mdot energy-residual divisions below
+_CP_SAT_NUDGE_K = 0.05  # K, how far off the saturation curve _inlet_cp clamps to
 
 _ARRANGEMENTS = ("counterflow", "parallel", "crossflow", "shell_and_tube", "custom")
+
+
+def _inlet_cp(fluid: "BaseFluid", P: float, T: float) -> float:
+    """cp(P, T), clamped at least _CP_SAT_NUDGE_K off the saturation
+    temperature for two-phase-capable fluids -- toward whichever side T
+    already sits on (liquid if T < T_sat, vapor if T >= T_sat), so a
+    legitimately-superheated-vapor inlet elsewhere never gets silently
+    treated as subcooled liquid. A real boiler drum's own downcomer
+    (Drum.water_out) is ALWAYS exactly saturated liquid by construction --
+    not a rare or ill-posed input -- so a two-stream HeatExchanger fed from
+    one (as in the SEGS benchmark's evaporator/riser) genuinely, repeatably
+    lands its cold inlet right on the saturation boundary at convergence,
+    where CoolProp's own phase determination is ambiguous to within its own
+    tolerance.
+
+    An earlier version of this only retried ON FAILURE (try cp(T), except
+    FluidRangeError: cp(T - nudge), ALWAYS toward liquid) -- that both
+    mishandled a genuine vapor-side inlet and, worse, was a DISCONTINUOUS
+    function of T (whichever side of CoolProp's own ~1e-4% ambiguity band T
+    happens to land on flips which branch runs), which visibly broke
+    Newton's own finite-difference Jacobian near this exact boundary: the
+    SEGS benchmark's residual norm would drop to within 1% of converging,
+    then jump back up by 2 orders of magnitude and oscillate indefinitely --
+    the classic signature of a discontinuous residual near the solution,
+    not a slow solve. Clamping to a fixed nudge band on the side T is
+    ALREADY on (not conditionally, on whether the raw call happened to
+    throw) removes that artifact-driven jump; a real jump still exists (cp
+    genuinely differs liquid vs. vapor) but it's now fixed to a small,
+    whole nudge band on the physically-correct side, not an unpredictable
+    ~1e-4%-wide sliver that could land on either.
+    """
+    if supports_two_phase(fluid):
+        try:
+            T_sat = fluid.saturation_temperature(P)
+        except FluidRangeError:
+            # supports_two_phase() is structural (does CoolPropFluid expose these
+            # methods at all), not "does this specific backend fluid have a dome" --
+            # an incompressible/liquid-only fluid (e.g. INCOMP::TVP1 oil) has no
+            # saturation curve to clamp away from at all; nothing to do here.
+            T_sat = None
+        if T_sat is not None:
+            if T_sat - _CP_SAT_NUDGE_K < T < T_sat:
+                T = T_sat - _CP_SAT_NUDGE_K
+            elif T_sat <= T < T_sat + _CP_SAT_NUDGE_K:
+                T = T_sat + _CP_SAT_NUDGE_K
+    return fluid.cp(P, T)
 
 
 class HeatExchanger(BaseComponent):
@@ -20,16 +70,26 @@ class HeatExchanger(BaseComponent):
     derived from geometry (UA, flow arrangement), auto-selected by which one
     you give.
 
-    Four ports: hot_in/hot_out and cold_in/cold_out, both streams sharing the
-    Network's single fluid model (no distinct hot/cold fluids yet -- same
-    limitation as every other component here).
+    Four ports: hot_in/hot_out and cold_in/cold_out. Each side's fluid is
+    resolved independently via NetworkState.fluid_at() on its own port, so
+    two genuinely different fluids (e.g. an oil HTF stream on hot_in/out, the
+    network's own working fluid on cold_in/out) work correctly as long as the
+    network actually has two fluids to resolve -- see Source's own `fluid`
+    parameter for how that second fluid gets introduced in the first place.
 
-    Give exactly one of `effectiveness` (fixed-effectiveness mode -- a
+    Give at most one of `effectiveness` (fixed-effectiveness mode -- a
     datasheet or an existing exchanger's known performance rating) or `UA`
     (NTU/geometry mode -- effectiveness derived from geometry and a flow
     arrangement, the way a map-based Compressor replaces SimpleCompressor's
     fixed PR/eta). `n_passes`/`arrangement`/`correlation` only apply in UA
-    mode; passing any of them alongside `effectiveness` is an error.
+    mode; passing any of them alongside `effectiveness` is an error. Giving
+    neither also means UA mode, with UA itself left as a free Newton unknown
+    (closed externally by a Setpoint/Controller targeting some downstream
+    quantity -- typically "T_hot_out [K]" or "T_cold_out [K]" against a
+    target approach/pinch temperature, the standard way a real HX's duty
+    gets sized to hit a specified terminal temperature difference rather
+    than a datasheet UA) -- the same free-parameter pattern SimpleHeatExchanger's
+    own Q=None already uses.
 
     Fixed-effectiveness mode:
         C_hot = mdot_hot * cp_hot, C_cold = mdot_cold * cp_cold (cp evaluated
@@ -126,12 +186,13 @@ class HeatExchanger(BaseComponent):
         n_passes: int = 1,
         arrangement: str = "counterflow",
         correlation: Optional[Callable[[float, float], float]] = None,
+        UA_guess: float = 1.0e5,
     ):
-        if (effectiveness is None) == (UA is None):
+        if effectiveness is not None and UA is not None:
             raise ValueError(
-                f"HeatExchanger {name!r}: give exactly one of effectiveness "
-                f"(fixed-effectiveness mode) or UA (NTU/geometry mode), not both "
-                f"and not neither (got effectiveness={effectiveness!r}, UA={UA!r})"
+                f"HeatExchanger {name!r}: give at most one of effectiveness "
+                f"(fixed-effectiveness mode) or UA (NTU/geometry mode) -- got both "
+                f"(effectiveness={effectiveness!r}, UA={UA!r})"
             )
         if not (0.0 < PR_hot <= 1.0):
             raise ValueError(f"HeatExchanger {name!r}: PR_hot must be in (0, 1], got {PR_hot}")
@@ -147,11 +208,22 @@ class HeatExchanger(BaseComponent):
             if n_passes != 1 or arrangement != "counterflow" or correlation is not None:
                 raise ValueError(
                     f"HeatExchanger {name!r}: n_passes/arrangement/correlation only apply "
-                    f"in UA mode (UA given); got effectiveness mode instead."
+                    f"in UA mode (UA given, or left free); got effectiveness mode instead."
                 )
             self._mode = "effectiveness"
         else:
-            if UA <= 0:
+            # UA mode -- UA given (fixed) or left None (a free Newton unknown,
+            # closed externally by a Setpoint/Controller targeting some
+            # downstream quantity, the same free-parameter pattern
+            # SimpleHeatExchanger's own Q=None already uses). Leaving UA free
+            # is the genuine equivalent of TESPy's own connection-level
+            # pinch/approach-temperature specs (e.g. ttd_l): TESPy's
+            # HeatExchanger with no UA/kA/ttd spec at all is *also*
+            # under-determined on its own -- it relies on an *additional*
+            # target elsewhere (a ttd_l, or another connection's fixed T/P)
+            # to close the system, exactly what UA=None + Setpoint(...,
+            # target_metric="T_hot_out [K]"/"T_cold_out [K]", ...) gives here.
+            if UA is not None and UA <= 0:
                 raise ValueError(f"HeatExchanger {name!r}: UA must be > 0, got {UA}")
             if n_passes < 1:
                 raise ValueError(f"HeatExchanger {name!r}: n_passes must be >= 1, got {n_passes}")
@@ -175,6 +247,7 @@ class HeatExchanger(BaseComponent):
         self.name = name
         self.effectiveness = effectiveness
         self.UA = UA
+        self.UA_guess = UA_guess
         self.PR_hot = PR_hot
         self.PR_cold = PR_cold
         self.n_passes = n_passes
@@ -184,6 +257,16 @@ class HeatExchanger(BaseComponent):
         self._hot_out_node = f"{name}.hot_out"
         self._cold_in_node = f"{name}.cold_in"
         self._cold_out_node = f"{name}.cold_out"
+
+    def free_parameters(self) -> dict[str, float]:
+        if self._mode == "ua" and self.UA is None:
+            return {"UA": self.UA_guess}
+        return {}
+
+    def _get_UA(self, state: "NetworkState") -> float:
+        if self.UA is not None:
+            return self.UA
+        return state.param(f"{self.name}.UA")
 
     def ports(self) -> dict[str, str]:
         return {
@@ -302,8 +385,8 @@ class HeatExchanger(BaseComponent):
 
         mdot_hot = state.mdot(self._hot_in_node)
         mdot_cold = state.mdot(self._cold_in_node)
-        cp_hot = hot_fluid.cp(P_hot_in, T_hot_in)
-        cp_cold = cold_fluid.cp(P_cold_in, T_cold_in)
+        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in)
+        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in)
 
         C_hot = max(mdot_hot * cp_hot, _MIN_C)
         C_cold = max(mdot_cold * cp_cold, _MIN_C)
@@ -362,15 +445,15 @@ class HeatExchanger(BaseComponent):
 
         mdot_hot = state.mdot(self._hot_in_node)
         mdot_cold = state.mdot(self._cold_in_node)
-        cp_hot = hot_fluid.cp(P_hot_in, T_hot_in)
-        cp_cold = cold_fluid.cp(P_cold_in, T_cold_in)
+        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in)
+        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in)
 
         C_hot = max(mdot_hot * cp_hot, _MIN_C)
         C_cold = max(mdot_cold * cp_cold, _MIN_C)
         C_min = self._smooth_min(C_hot, C_cold)
         C_max = max(C_hot + C_cold - C_min, C_min)
         Cr = C_min / C_max
-        NTU = self.UA / C_min
+        NTU = self._get_UA(state) / C_min
         eff = self._effectiveness_shell_and_tube(NTU, Cr, self.n_passes)
         Q = eff * C_min * (T_hot_in - T_cold_in)
 
@@ -400,7 +483,7 @@ class HeatExchanger(BaseComponent):
         n = self.n_passes
         mdot_hot = state.mdot(self._hot_in_node)
         mdot_cold = state.mdot(self._cold_in_node)
-        UA_seg = self.UA / n
+        UA_seg = self._get_UA(state) / n
         PR_hot_seg = self.PR_hot ** (1.0 / n)
         PR_cold_seg = self.PR_cold ** (1.0 / n)
         # One fluid per stream for the whole exchanger (its own inlet
@@ -418,8 +501,8 @@ class HeatExchanger(BaseComponent):
             P_cold_a, h_cold_a = state.node(cold_a)
             T_hot_a = hot_fluid.temperature_ph(P_hot_a, h_hot_a)
             T_cold_a = cold_fluid.temperature_ph(P_cold_a, h_cold_a)
-            cp_hot = hot_fluid.cp(P_hot_a, T_hot_a)
-            cp_cold = cold_fluid.cp(P_cold_a, T_cold_a)
+            cp_hot = _inlet_cp(hot_fluid, P_hot_a, T_hot_a)
+            cp_cold = _inlet_cp(cold_fluid, P_cold_a, T_cold_a)
 
             C_hot = max(mdot_hot * cp_hot, _MIN_C)
             C_cold = max(mdot_cold * cp_cold, _MIN_C)
@@ -445,15 +528,22 @@ class HeatExchanger(BaseComponent):
         P_hot_in, h_hot_in = state.node(self._hot_in_node)
         P_hot_out, h_hot_out = state.node(self._hot_out_node)
         P_cold_in, h_cold_in = state.node(self._cold_in_node)
+        P_cold_out, h_cold_out = state.node(self._cold_out_node)
         hot_fluid = state.fluid_at(self._hot_in_node)
         cold_fluid = state.fluid_at(self._cold_in_node)
         T_hot_in = hot_fluid.temperature_ph(P_hot_in, h_hot_in)
         T_cold_in = cold_fluid.temperature_ph(P_cold_in, h_cold_in)
+        # T_hot_out/T_cold_out use each outlet's own resolved fluid (hot_out's
+        # may differ from hot_in's for a composition-changing network, even
+        # though this class doesn't itself change composition) rather than
+        # assuming hot_fluid/cold_fluid still apply downstream.
+        T_hot_out = state.fluid_at(self._hot_out_node).temperature_ph(P_hot_out, h_hot_out)
+        T_cold_out = state.fluid_at(self._cold_out_node).temperature_ph(P_cold_out, h_cold_out)
 
         mdot_hot = state.mdot(self._hot_in_node)
         mdot_cold = state.mdot(self._cold_in_node)
-        cp_hot = hot_fluid.cp(P_hot_in, T_hot_in)
-        cp_cold = cold_fluid.cp(P_cold_in, T_cold_in)
+        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in)
+        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in)
         C_min = self._smooth_min(max(mdot_hot * cp_hot, _MIN_C), max(mdot_cold * cp_cold, _MIN_C))
         Q_max = C_min * (T_hot_in - T_cold_in)
 
@@ -464,6 +554,8 @@ class HeatExchanger(BaseComponent):
             "effectiveness [-]": effectiveness,
             "T_hot_in [K]": T_hot_in,
             "T_cold_in [K]": T_cold_in,
+            "T_hot_out [K]": T_hot_out,
+            "T_cold_out [K]": T_cold_out,
             "PR_hot [-]": self.PR_hot,
             "PR_cold [-]": self.PR_cold,
         }

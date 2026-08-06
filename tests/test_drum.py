@@ -205,6 +205,95 @@ def test_net_liquid_inflow_raises_level_and_condenses_pressure():
     assert deriv["P"] < 0.0  # subcooled feed condenses vapor => pressure shrink
 
 
+# ---------------------------------------------------------------------------
+# P_target / water_out_mdot: extra closing residuals for the free (P_drum,
+# riser recirculation mdot) degrees of freedom a typical surrounding
+# topology otherwise leaves unclosed (see Drum's own docstring).
+# ---------------------------------------------------------------------------
+
+
+def test_p_target_and_water_out_mdot_add_no_extra_residuals_by_default():
+    d = Drum(name="d1", V=2.0, P0=1.0e6, fluid=WATER, has_riser=True)
+    P = 1.0e6
+    state = _FakeState(
+        fluid=WATER,
+        node_values={
+            "d1.steam_out": (P, WATER.saturated_vapor_enthalpy(P)),
+            "d1.water_out": (P, WATER.saturated_liquid_enthalpy(P)),
+        },
+        mdots={"d1.water_out": 5.0},
+        params={"d1.P": P, "d1.h": d.h0},
+    )
+    assert len(d.residuals(state)) == 4
+
+
+def test_p_target_adds_fifth_residual_pinning_drum_pressure():
+    d = Drum(name="d1", V=2.0, P0=1.0e6, fluid=WATER, has_riser=False, P_target=1.2e6)
+    P_drum = 1.0e6  # deliberately off-target
+    state = _FakeState(
+        fluid=WATER,
+        node_values={
+            "d1.steam_out": (P_drum, WATER.saturated_vapor_enthalpy(P_drum)),
+            "d1.water_out": (P_drum, WATER.saturated_liquid_enthalpy(P_drum)),
+        },
+        mdots={},
+        params={"d1.P": P_drum, "d1.h": d.h0},
+    )
+    residuals = d.residuals(state)
+    assert len(residuals) == 5
+    assert math.isclose(residuals[-1], P_drum - 1.2e6, rel_tol=1e-12)
+
+    # Zero exactly when P_drum sits at the target.
+    state_at_target = _FakeState(
+        fluid=WATER,
+        node_values={
+            "d1.steam_out": (1.2e6, WATER.saturated_vapor_enthalpy(1.2e6)),
+            "d1.water_out": (1.2e6, WATER.saturated_liquid_enthalpy(1.2e6)),
+        },
+        mdots={},
+        params={"d1.P": 1.2e6, "d1.h": d.h0},
+    )
+    assert math.isclose(d.residuals(state_at_target)[-1], 0.0, abs_tol=1e-9)
+
+
+def test_water_out_mdot_adds_residual_pinning_downcomer_flow():
+    d = Drum(name="d1", V=2.0, P0=1.0e6, fluid=WATER, has_riser=True, water_out_mdot=8.0)
+    P = 1.0e6
+    state = _FakeState(
+        fluid=WATER,
+        node_values={
+            "d1.steam_out": (P, WATER.saturated_vapor_enthalpy(P)),
+            "d1.water_out": (P, WATER.saturated_liquid_enthalpy(P)),
+        },
+        mdots={"d1.water_out": 6.0},  # deliberately off-target
+        params={"d1.P": P, "d1.h": d.h0},
+    )
+    residuals = d.residuals(state)
+    assert len(residuals) == 5
+    assert math.isclose(residuals[-1], 6.0 - 8.0, rel_tol=1e-12)
+
+
+def test_p_target_and_water_out_mdot_together_add_both_residuals():
+    d = Drum(
+        name="d1", V=2.0, P0=1.0e6, fluid=WATER, has_riser=True,
+        P_target=1.1e6, water_out_mdot=8.0,
+    )
+    P = 1.0e6
+    state = _FakeState(
+        fluid=WATER,
+        node_values={
+            "d1.steam_out": (P, WATER.saturated_vapor_enthalpy(P)),
+            "d1.water_out": (P, WATER.saturated_liquid_enthalpy(P)),
+        },
+        mdots={"d1.water_out": 8.0},
+        params={"d1.P": P, "d1.h": d.h0},
+    )
+    residuals = d.residuals(state)
+    assert len(residuals) == 6
+    assert math.isclose(residuals[-2], P - 1.1e6, rel_tol=1e-12)
+    assert math.isclose(residuals[-1], 0.0, abs_tol=1e-12)
+
+
 def test_manual_backward_euler_step_raises_level():
     # One backward-Euler step of the drum's own (P, h) under net liquid
     # inflow must increase the reported level -- the transient use case,

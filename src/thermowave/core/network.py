@@ -166,13 +166,25 @@ class Connection:
 
 def _can_change_composition(component: "BaseComponent") -> bool:
     """Whether this component can alter fluid composition between its inlet
-    and outlet — i.e. whether it overrides either composition hook.
+    and outlet — i.e. whether it overrides either composition hook, or
+    seeds a fluid of its own (e.g. Source(fluid=...), Recycle(fluid_guess=...)).
 
-    Only Combustor (outlet_fluid) and Junction (merge_fluids) do so among the
-    package's components. Comparing the *class* attribute against
-    BaseComponent's is the correct test (bound methods would compare unequal
-    for every instance); the vars() check additionally catches an override
-    monkeypatched onto a single instance.
+    outlet_fluid()/merge_fluids() overrides: only Combustor (outlet_fluid)
+    and Junction (merge_fluids) do so among the package's components.
+    Comparing the *class* attribute against BaseComponent's is the correct
+    test (bound methods would compare unequal for every instance); the
+    vars() check additionally catches an override monkeypatched onto a
+    single instance.
+
+    fluid_seed(): unlike the two hooks above, this one takes no `state`
+    argument, so it's cheap and safe to just call it here directly rather
+    than needing a second class-vs-override comparison -- a component with
+    nothing to seed returns {} (falsy), same as BaseComponent's own
+    default. This is what makes a Source(fluid=OIL) branch (no Combustor or
+    Junction anywhere in the network) register as composition-changing at
+    all -- without it, Network._resolve_node_fluid()'s fast path would
+    silently resolve every node, oil ones included, to the network's own
+    default fluid instead of ever calling fluid_seed().
     """
     from thermowave.components.base_component import BaseComponent
 
@@ -182,7 +194,9 @@ def _can_change_composition(component: "BaseComponent") -> bool:
     if cls.merge_fluids is not BaseComponent.merge_fluids:
         return True
     instance_attrs = vars(component)
-    return "outlet_fluid" in instance_attrs or "merge_fluids" in instance_attrs
+    if "outlet_fluid" in instance_attrs or "merge_fluids" in instance_attrs:
+        return True
+    return bool(component.fluid_seed())
 
 
 class _FluidPropagationPlan:

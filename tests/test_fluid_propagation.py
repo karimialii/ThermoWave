@@ -153,6 +153,65 @@ def test_resolve_node_fluid_downstream_component_actually_reads_the_swap():
 
 
 # ---------------------------------------------------------------------------
+# Source(fluid=...): fluid_seed() with no Combustor/Junction anywhere in the
+# network -- the fast-path bug this covers: _can_change_composition() must
+# recognize Source(fluid=...) as composition-changing on its own, or the
+# fast path silently resolves every node (the seeded ones included) to the
+# network's own default fluid instead of ever consulting fluid_seed().
+# ---------------------------------------------------------------------------
+
+
+def test_can_change_composition_true_for_source_with_own_fluid():
+    from thermowave.core.network import _can_change_composition
+
+    assert _can_change_composition(Source(name="src", P=200000.0, T=400.0, mdot=1.0, fluid=OTHER))
+
+
+def test_can_change_composition_false_for_ordinary_source():
+    from thermowave.core.network import _can_change_composition
+
+    assert not _can_change_composition(Source(name="src", P=200000.0, T=400.0, mdot=1.0))
+
+
+def test_source_with_own_fluid_seeds_node_fluid_with_no_composition_changing_component():
+    # No Combustor, no Junction, no outlet_fluid()/merge_fluids() override
+    # anywhere -- the only thing making this network's composition non-
+    # uniform is Source's own `fluid` seed.
+    src = Source(name="src", P=200000.0, T=400.0, mdot=1.0, fluid=OTHER)
+    pipe = Pipe(name="pipe", L=1.0, D=0.1, f=0.02)
+    snk = Sink(name="snk")
+    network = Network(fluid=AIR)
+    for c in (src, pipe, snk):
+        network.add_component(c)
+    network.connect(src, "out", pipe, "in")
+    network.connect(pipe, "out", snk, "in")
+
+    plan = network._fluid_propagation_plan()
+    assert plan.has_composition_change
+
+    result = network.solve(tol=1e-9, max_iter=100)
+    assert result.node_fluid["src.out"] is OTHER
+    assert result.node_fluid["pipe.out"] is OTHER
+
+
+def test_source_without_fluid_still_uses_fast_path():
+    # Plain Source(fluid=None) (the default, pre-existing behavior) must not
+    # be mistaken for composition-changing -- the fast path (mapping every
+    # node straight to the network's own default fluid) should still apply.
+    src = Source(name="src", P=200000.0, T=400.0, mdot=1.0)
+    pipe = Pipe(name="pipe", L=1.0, D=0.1, f=0.02)
+    snk = Sink(name="snk")
+    network = Network(fluid=AIR)
+    for c in (src, pipe, snk):
+        network.add_component(c)
+    network.connect(src, "out", pipe, "in")
+    network.connect(pipe, "out", snk, "in")
+
+    plan = network._fluid_propagation_plan()
+    assert not plan.has_composition_change
+
+
+# ---------------------------------------------------------------------------
 # Combustor.outlet_fluid(): gating + live composition propagation
 # ---------------------------------------------------------------------------
 

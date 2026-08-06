@@ -2,7 +2,12 @@ import math
 
 import pytest
 
-from thermowave.components.heat_exchanger import HeatExchanger, MultiPassHeatExchanger
+from thermowave.components.heat_exchanger import (
+    _CP_SAT_NUDGE_K,
+    HeatExchanger,
+    MultiPassHeatExchanger,
+    _inlet_cp,
+)
 from thermowave.fluids.ideal_gas import IdealGasFluid
 
 AIR = IdealGasFluid(name="air", R=287.05, cp=1005.0)
@@ -57,17 +62,78 @@ def _balanced_effectiveness_case(effectiveness=0.7, PR_hot=0.95, PR_cold=0.9):
     return hx, state, Q
 
 
+# --- _inlet_cp: saturation-boundary clamp -----------------------------------
+
+
+def test_inlet_cp_passes_through_unclamped_for_non_two_phase_fluid():
+    # AIR has no saturation dome (supports_two_phase() is False) -- nothing
+    # to clamp away from, so _inlet_cp must be a plain pass-through to cp().
+    P, T = 300000.0, 500.0
+    assert _inlet_cp(AIR, P, T) == AIR.cp(P, T)
+
+
+def test_inlet_cp_clamps_to_liquid_side_just_below_saturation():
+    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    water = CoolPropFluid(name="Water")
+    P = 1.0e6
+    T_sat = water.saturation_temperature(P)
+
+    # Arbitrarily close to T_sat from below -- must land on the same clamped
+    # liquid-side value regardless of how close, not flip based on whether
+    # the raw cp() call happened to throw.
+    for offset in (1e-2, 1e-4, 1e-8):
+        T = T_sat - offset
+        clamped = T_sat - _CP_SAT_NUDGE_K
+        assert math.isclose(_inlet_cp(water, P, T), water.cp(P, clamped), rel_tol=1e-12)
+
+
+def test_inlet_cp_clamps_to_vapor_side_just_above_saturation():
+    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    water = CoolPropFluid(name="Water")
+    P = 1.0e6
+    T_sat = water.saturation_temperature(P)
+
+    for offset in (1e-2, 1e-4, 1e-8):
+        T = T_sat + offset
+        clamped = T_sat + _CP_SAT_NUDGE_K
+        assert math.isclose(_inlet_cp(water, P, T), water.cp(P, clamped), rel_tol=1e-12)
+
+
+def test_inlet_cp_unclamped_far_from_saturation_either_side():
+    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    water = CoolPropFluid(name="Water")
+    P = 1.0e6
+    T_sat = water.saturation_temperature(P)
+
+    T_subcooled = T_sat - 50.0
+    T_superheated = T_sat + 50.0
+    assert math.isclose(_inlet_cp(water, P, T_subcooled), water.cp(P, T_subcooled), rel_tol=1e-9)
+    assert math.isclose(
+        _inlet_cp(water, P, T_superheated), water.cp(P, T_superheated), rel_tol=1e-9
+    )
+    # And the two sides genuinely differ (liquid vs. vapor cp) -- the clamp
+    # doesn't paper over a real physical discontinuity, only the artificial
+    # one right at the boundary.
+    assert not math.isclose(
+        _inlet_cp(water, P, T_subcooled), _inlet_cp(water, P, T_superheated), rel_tol=0.05
+    )
+
+
 # --- construction / mode selection ----------------------------------------
 
 
 def test_rejects_both_effectiveness_and_ua():
-    with pytest.raises(ValueError, match="exactly one"):
+    with pytest.raises(ValueError, match="at most one"):
         HeatExchanger(name="hx1", PR_hot=1.0, PR_cold=1.0, effectiveness=0.7, UA=500.0)
 
 
-def test_rejects_neither_effectiveness_nor_ua():
-    with pytest.raises(ValueError, match="exactly one"):
-        HeatExchanger(name="hx1", PR_hot=1.0, PR_cold=1.0)
+def test_neither_effectiveness_nor_ua_means_free_ua():
+    # UA mode with UA left as a free Newton unknown (see HeatExchanger's own
+    # docstring) -- no longer an error, the same free-parameter pattern
+    # SimpleHeatExchanger's own Q=None already uses.
+    hx = HeatExchanger(name="hx1", PR_hot=1.0, PR_cold=1.0)
+    assert hx._mode == "ua"
+    assert hx.free_parameters() == {"UA": hx.UA_guess}
 
 
 def test_rejects_arrangement_kwargs_in_effectiveness_mode():
@@ -156,3 +222,42 @@ def test_multi_pass_heat_exchanger_is_a_heat_exchanger_subclass():
     mp = MultiPassHeatExchanger(name="hx1", UA=500.0, PR_hot=0.98, PR_cold=0.97)
     assert isinstance(mp, HeatExchanger)
     assert mp._mode == "ua"
+
+
+# --- UA=None: free Newton unknown, closed by a Setpoint --------------------
+
+
+def test_ua_none_is_a_free_parameter_seeded_from_ua_guess():
+    hx = HeatExchanger(name="hx1", PR_hot=1.0, PR_cold=1.0, UA_guess=2.5e4)
+    assert hx.free_parameters() == {"UA": 2.5e4}
+
+
+def test_ua_none_end_to_end_solve_hits_setpoint_target_hot_out_temperature():
+    from thermowave.components.setpoint import Setpoint
+    from thermowave.components.sink import Sink
+    from thermowave.components.source import Source
+    from thermowave.core.network import Network
+
+    hot_src = Source(name="hot_src", P=300000.0, T=500.0, mdot=1.0)
+    cold_src = Source(name="cold_src", P=300000.0, T=300.0, mdot=1.2)
+    hx = HeatExchanger(name="hx1", PR_hot=1.0, PR_cold=1.0)  # UA left free
+    target_T_hot_out = 420.0
+    sp = Setpoint(
+        name="sp1", component=hx, free_param="UA",
+        target_metric="T_hot_out [K]", value=target_T_hot_out,
+    )
+    hot_snk = Sink(name="hot_snk")
+    cold_snk = Sink(name="cold_snk")
+
+    network = Network(fluid=AIR)
+    for c in (hot_src, cold_src, hx, sp, hot_snk, cold_snk):
+        network.add_component(c)
+    network.connect(hot_src, "out", hx, "hot_in")
+    network.connect(hx, "hot_out", hot_snk, "in")
+    network.connect(cold_src, "out", hx, "cold_in")
+    network.connect(hx, "cold_out", cold_snk, "in")
+
+    result = network.solve(tol=1e-9, max_iter=200)
+    metrics = hx.report_metrics(result.state())
+    assert math.isclose(metrics["T_hot_out [K]"], target_T_hot_out, abs_tol=1e-3)
+    assert result.params["hx1.UA"] > 0.0
