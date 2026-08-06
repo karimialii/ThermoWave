@@ -325,3 +325,96 @@ def test_manual_backward_euler_step_raises_level():
         h_cur += dt * r["h"]
     level_after = _level_from_ph(WATER, P_cur, h_cur)
     assert level_after > level_before
+
+
+# ---------------------------------------------------------------------------
+# level_target: the steady-state closure for the drum's own `h`, and the
+# one-sided density partials that keep state_derivative() single-regime near
+# the dome boundary. Both were found together while diagnosing why the SEGS
+# boiler-internals subsystem stalled -- see Drum's own docstring.
+# ---------------------------------------------------------------------------
+
+
+def test_rejects_level_target_out_of_range():
+    with pytest.raises(ValueError, match="level_target must be in"):
+        Drum(name="d1", V=2.0, P0=1.0e6, fluid=WATER, level_target=0.0)
+    with pytest.raises(ValueError, match="level_target must be in"):
+        Drum(name="d1", V=2.0, P0=1.0e6, fluid=WATER, level_target=1.0)
+
+
+def _drum_state(d, P, h, mdot_water=5.0):
+    return _FakeState(
+        fluid=WATER,
+        node_values={
+            "d1.steam_out": (P, WATER.saturated_vapor_enthalpy(P)),
+            "d1.water_out": (P, WATER.saturated_liquid_enthalpy(P)),
+        },
+        mdots={"d1.water_out": mdot_water, "d1.steam_out": 1.0},
+        params={"d1.P": P, "d1.h": h},
+    )
+
+
+def test_level_target_adds_residual_zero_at_the_targeted_level():
+    P = 1.0e6
+    d = Drum(
+        name="d1", V=2.0, P0=P, fluid=WATER, level0=0.5, has_riser=False,
+        level_target=0.5,
+    )
+    residuals = d.residuals(_drum_state(d, P, d.h0))
+    assert len(residuals) == 5
+    # d.h0 was constructed from level0=0.5, so the level residual is zero there.
+    assert math.isclose(residuals[-1], 0.0, abs_tol=1e-9)
+    # ... and it agrees with what report_metrics reports as the level.
+    assert math.isclose(
+        d.report_metrics(_drum_state(d, P, d.h0))["level [-]"], 0.5, abs_tol=1e-9
+    )
+
+
+def test_level_target_residual_is_strictly_monotone_in_h_across_the_dome():
+    # This is the whole point of the closure: it must give the solver a
+    # NON-ZERO d(residual)/d(h_drum) everywhere, including outside the dome.
+    # A version that clamped quality to [0, 1] (the way report_metrics does)
+    # would be exactly flat for h < h_f / h > h_g -- i.e. the Jacobian column
+    # for `h` would go back to zero in precisely the region an overshooting
+    # Newton step lands in, which is what made the SEGS boiler subsystem
+    # stall in the first place.
+    P = 1.0e6
+    d = Drum(name="d1", V=2.0, P0=P, fluid=WATER, has_riser=False, level_target=0.5)
+    h_f = WATER.saturated_liquid_enthalpy(P)
+    h_g = WATER.saturated_vapor_enthalpy(P)
+    span = h_g - h_f
+    hs = [h_f - 0.05 * span, h_f, h_f + 0.25 * span, h_g, h_g + 0.05 * span]
+    values = [d.residuals(_drum_state(d, P, h))[-1] for h in hs]
+    assert all(b < a for a, b in zip(values, values[1:])), values
+
+
+def test_state_derivative_does_not_flip_sign_across_the_saturation_boundary():
+    # A finite-difference density partial whose step STRADDLES h_f blends two
+    # regimes whose drho/dh differ by ~14x, which flips the SIGN of the 2x2
+    # solve's determinant (measured at this pressure, one J/kg below h_f:
+    # det = -6.4e-2 straddling vs. +9.6e-2 one-sided) and so of dP/dt and
+    # dh/dt themselves -- a discontinuity sitting exactly where a boiler drum
+    # lives. Isolated here by giving the drum a pure MASS imbalance with zero
+    # energy imbalance (every inlet and outlet carrying the drum's own h), so
+    # dP/dt reduces to b1 * rho * V / det and its sign is exactly det's. The
+    # magnitude still changes a lot across the boundary -- liquid and
+    # two-phase compressibility genuinely differ ~170x -- but never the sign.
+    P = 9.997764e6  # the SEGS boiler drum's own pressure, where this was found
+    d = Drum(name="d1", V=10.0, P0=P, fluid=WATER, has_riser=False)
+    h_f = WATER.saturated_liquid_enthalpy(P)
+    signs = set()
+    for offset in (-50.0, -5.0, -1.0, -0.1, 0.0, 0.1, 1.0, 5.0, 50.0):
+        h = h_f + offset
+        state = _FakeState(
+            fluid=WATER,
+            node_values={
+                "d1.feed_in": (P, h),
+                "d1.steam_out": (P, h),
+                "d1.water_out": (P, h),
+            },
+            # Net mass accumulation, held identical at every h -> dP/dt > 0.
+            mdots={"d1.feed_in": 2.0, "d1.steam_out": 0.5, "d1.water_out": 0.5},
+            params={"d1.P": P, "d1.h": h},
+        )
+        signs.add(math.copysign(1.0, d.state_derivative(state)["P"]))
+    assert signs == {1.0}, f"dP/dt changed sign across h_f: {signs}"

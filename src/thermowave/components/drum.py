@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from thermowave.components.base_component import BaseComponent
+from thermowave.core.exceptions import FluidRangeError
 from thermowave.core.settings import settings
 from thermowave.fluids.two_phase import require_two_phase
 
@@ -52,9 +53,10 @@ class Drum(BaseComponent):
     dictate how flow splits between steam draw and downcomer circulation.
 
     Level: intended for normal operation 0 < x < 1 (a partly-full drum). The
-    reported level [-] is the liquid volume fraction. The finite-difference
-    density partials in state_derivative() can momentarily cross the dome
-    boundary if the drum is driven to x≈0 or x≈1 — a known robustness limit.
+    reported level [-] is the liquid volume fraction. state_derivative()'s
+    finite-difference density partials are stepped one-sided so they never
+    cross the dome boundary even at x≈0 or x≈1 — see that method for why a
+    straddling step is not merely inaccurate but sign-flipping.
 
     Usable in an ordinary Network.solve() (dt=None), not just
     solve_transient(): state_derivative()==0 there reduces exactly to the
@@ -96,6 +98,40 @@ class Drum(BaseComponent):
     default None when something else in the topology already closes it
     (e.g. a fixed-mdot boundary on that branch) or for solve_transient().
 
+    level_target [-]: when given, adds a residual pinning the drum's liquid
+    volume fraction (the same quantity report_metrics() reports as
+    "level [-]") — the steady-state closure for the drum's OWN differential
+    enthalpy state, `h`. This one is not merely convenient like P_target and
+    water_out_mdot are; without it a steady solve (dt=None) is EXACTLY
+    singular, for a reason worth spelling out because the symptom looks
+    nothing like the cause. In steady state the solver closes each
+    differential parameter with state_derivative()==0, i.e. this drum's own
+    mass and energy balance:
+        b1 = sum(mdot_in) - sum(mdot_out)
+        b2 = sum(mdot_in*(h_in - h)) - sum(mdot_out*(h_out - h)) - heat_loss
+    b1 has no `h` in it at all, and b2's own `h` terms collapse to -h*b1 —
+    so d(b2)/dh = -b1, which is identically zero at any solution. `h`
+    appears in no other residual either (residuals() pins the two outlets to
+    h_g/h_f of P_drum, not of h). The whole Jacobian column for this
+    component's `h` therefore vanishes at the solution: a steady drum's
+    water inventory/level is genuinely undetermined by conservation alone,
+    exactly as a real boiler drum's is (which is why real ones have level
+    control). state_derivative()'s 2x2 solve divides through by det, which
+    hides this — instead of a clean singular-matrix error, Newton gets a
+    tiny-but-nonzero column, lets `h` drift, walks it across h_f(P) out of
+    the two-phase dome (where the density partials, and hence det, are ~170x
+    different — the multiplier on b1 in dP/dt jumps from ~4e2 to ~7e4), and
+    the residual norm jumps 2-3 orders of magnitude and oscillates forever.
+    That was diagnosed on the SEGS boiler-internals subsystem: residual fell
+    to 1.6e2 by iteration 38, jumped to 1.4e5 by 41, then plateaued at
+    ~1.6e5 through iteration 300+ — with EVERY other residual in the network
+    still contracting smoothly the whole time, and drum.dP/dt alone carrying
+    the entire norm. Setting level_target (0.5 for a half-full drum, the
+    usual design point) closes `h` and that same network converges in 89
+    iterations to 8.7e-08. Leave at the default None only for
+    solve_transient(), where dt drives h forward from h0 instead and no
+    steady closure is wanted.
+
     fluid is used only at construction, to convert level0 (liquid volume
     fraction, default 0.5) into an initial mass quality x0 at P0 and then
     h0 = enthalpy_pq(P0, x0) — differential_parameters() has no access to
@@ -114,11 +150,16 @@ class Drum(BaseComponent):
         heat_loss: float | None = None,
         P_target: float | None = None,
         water_out_mdot: float | None = None,
+        level_target: float | None = None,
     ):
         if V <= 0.0:
             raise ValueError(f"Drum {name!r}: V must be > 0, got {V}")
         if not (0.0 < level0 < 1.0):
             raise ValueError(f"Drum {name!r}: level0 must be in (0, 1), got {level0}")
+        if level_target is not None and not (0.0 < level_target < 1.0):
+            raise ValueError(
+                f"Drum {name!r}: level_target must be in (0, 1), got {level_target}"
+            )
         require_two_phase(fluid, f"Drum {name!r}")
 
         self.name = name
@@ -128,6 +169,7 @@ class Drum(BaseComponent):
         self.P0 = settings.pressure_to_si(P0)
         self.P_target = None if P_target is None else settings.pressure_to_si(P_target)
         self.water_out_mdot = water_out_mdot
+        self.level_target = level_target
 
         # Seed the differential state: convert liquid volume fraction level0
         # into a mass quality x0 at P0, then to an average enthalpy h0.
@@ -184,6 +226,58 @@ class Drum(BaseComponent):
             return self.P0, self._h_f0
         return self.P0, self.h0
 
+    @staticmethod
+    def _level_from_ph(fluid: "BaseFluid", P: float, h: float, clamp: bool) -> float:
+        """Liquid volume fraction at (P, h).
+
+        clamp=True (reporting) pins the mass quality to [0, 1] so a drum
+        driven momentarily outside the dome still reports a level in range.
+        clamp=False (the level_target residual) must NOT do that: a clamped
+        residual is exactly flat in h outside the dome, which puts the
+        Jacobian column for this component's `h` back at zero in precisely
+        the region the closure exists to keep Newton out of — the unclamped
+        form stays monotone in h on both sides of h_f/h_g instead, so a
+        Newton step that overshoots the dome still gets pushed back in.
+        """
+        h_f = fluid.saturated_liquid_enthalpy(P)
+        h_g = fluid.saturated_vapor_enthalpy(P)
+        x = (h - h_f) / (h_g - h_f) if h_g > h_f else 0.0
+        if clamp:
+            x = min(max(x, 0.0), 1.0)
+        rho = fluid.density_ph(P, h)
+        rho_f = fluid.density_ph(P, h_f)
+        # level = (1 - x) * v_f / v_avg, with v = 1/rho.
+        return (1.0 - x) * rho / rho_f
+
+    @staticmethod
+    def _one_sided_eps(
+        eps: float, in_dome: Callable[[float], bool], base_in_dome: bool
+    ) -> float:
+        """`eps`, negated if stepping forward by it would change which side
+        of the saturation dome the state sits on.
+
+        A finite-difference step that STRADDLES the dome boundary doesn't
+        just lose accuracy — it produces a partial derivative that is a
+        blend of two regimes differing by ~10x, and (because the 2x2 solve
+        below divides by det = V^2*(rho*drho_dP + drho_dh)) that is enough
+        to flip det's SIGN. Measured on the SEGS drum at P=99.98 bar with
+        h one J/kg below h_f: the straddling forward step gives
+        drho_dh = -2.04e-3 and det = -6.4e-2, against the true one-sided
+        liquid-side values drho_dh = -4.3e-4, det = +9.6e-2. dP/dt and dh/dt
+        then reverse sign across a 2 J/kg-wide sliver of h, which is a
+        discontinuity sitting right where a boiler drum's state naturally
+        lives (see _inlet_cp in components/heat_exchanger.py for the same
+        class of defect on the heat-exchanger side). Stepping away from the
+        boundary instead keeps the derivative one-sided and single-regime;
+        backward differencing is just as valid a first-order approximation
+        as forward.
+        """
+        if in_dome(eps) is base_in_dome:
+            return eps
+        if in_dome(-eps) is base_in_dome:
+            return -eps
+        return eps  # both directions cross (eps wider than the dome itself)
+
     def state_derivative(self, state: "NetworkState") -> dict[str, float]:
         P = state.param(f"{self.name}.P")
         h = state.param(f"{self.name}.h")
@@ -192,6 +286,35 @@ class Drum(BaseComponent):
 
         eps_P = max(abs(P) * 1.0e-6, 1.0)
         eps_h = max(abs(h) * 1.0e-6, 1.0)
+        # Keep both perturbations on the same side of the saturation dome as
+        # (P, h) itself -- see _one_sided_eps for why a straddling step is
+        # sign-flipping rather than merely imprecise.
+        try:
+            base_in_dome = (
+                fluid.saturated_liquid_enthalpy(P) <= h <= fluid.saturated_vapor_enthalpy(P)
+            )
+            eps_h = self._one_sided_eps(
+                eps_h,
+                lambda d: (
+                    fluid.saturated_liquid_enthalpy(P)
+                    <= h + d
+                    <= fluid.saturated_vapor_enthalpy(P)
+                ),
+                base_in_dome,
+            )
+            eps_P = self._one_sided_eps(
+                eps_P,
+                lambda d: (
+                    fluid.saturated_liquid_enthalpy(P + d)
+                    <= h
+                    <= fluid.saturated_vapor_enthalpy(P + d)
+                ),
+                base_in_dome,
+            )
+        except FluidRangeError:
+            # Supercritical / off-chart P has no dome boundary to step away
+            # from; the plain forward differences below are already correct.
+            pass
         drho_dP = (fluid.density_ph(P + eps_P, h) - rho) / eps_P
         drho_dh = (fluid.density_ph(P, h + eps_h) - rho) / eps_h
 
@@ -227,6 +350,7 @@ class Drum(BaseComponent):
         fluid = state.fluid_at(self._feed_in_node)
         require_two_phase(fluid, f"Drum {self.name!r}")
         P_drum = state.param(f"{self.name}.P")
+        h_drum = state.param(f"{self.name}.h")
 
         P_steam, h_steam = state.node(self._steam_out_node)
         P_water, h_water = state.node(self._water_out_node)
@@ -243,6 +367,8 @@ class Drum(BaseComponent):
             out.append(P_drum - self.P_target)
         if self.water_out_mdot is not None:
             out.append(state.mdot(self._water_out_node) - self.water_out_mdot)
+        if self.level_target is not None:
+            out.append(self._level_from_ph(fluid, P_drum, h_drum, clamp=False) - self.level_target)
         return out
 
     def report_metrics(self, state: "NetworkState") -> dict[str, float]:
@@ -250,16 +376,7 @@ class Drum(BaseComponent):
         h = state.param(f"{self.name}.h")
         fluid = state.fluid_at(self._feed_in_node)
 
-        h_f = fluid.saturated_liquid_enthalpy(P)
-        h_g = fluid.saturated_vapor_enthalpy(P)
-        rho = fluid.density_ph(P, h)
-        rho_f = fluid.density_ph(P, h_f)
-        # Mass quality by enthalpy (valid in the dome), clamped for reporting.
-        x = (h - h_f) / (h_g - h_f) if h_g > h_f else 0.0
-        x_rep = min(max(x, 0.0), 1.0)
-        v_avg = 1.0 / rho
-        v_f = 1.0 / rho_f
-        level = (1.0 - x_rep) * v_f / v_avg  # liquid volume fraction
+        level = self._level_from_ph(fluid, P, h, clamp=True)
 
         return {
             "P [Pa]": P,
