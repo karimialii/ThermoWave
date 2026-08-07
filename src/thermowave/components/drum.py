@@ -20,6 +20,22 @@ class Drum(BaseComponent):
     """Steam drum: a constant-volume, two-phase reservoir at saturation — a
     boiler's steam/water separator, with genuine liquid-level dynamics.
 
+    IMPORTANT — used in an ordinary Network.solve() (dt=None): give
+    level_target, or this component is silently singular. Mass/energy
+    conservation alone never determines a steady drum's own water
+    inventory (see "What it does NOT do" below) — without level_target,
+    Newton can still take steps (nothing raises a clean error), but the
+    Jacobian column for this drum's own h is structurally near-zero at the
+    solution, so h is free to drift, typically across the saturation
+    boundary, where state_derivative()'s density partials swing sharply —
+    the observed symptom is a residual that contracts smoothly for many
+    iterations, then jumps 2-3 orders of magnitude and stalls, looking like
+    a starting-guess problem rather than the structural one it is. There is
+    no dt-aware runtime check for this in Network (level_target is only
+    meaningful for a steady solve; solve_transient() doesn't need it, and
+    Network has no general way to know in advance which mode a given Drum
+    will run under) — this docstring warning is the only guard.
+
     Requires a two-phase-capable fluid (CoolPropFluid); checked at residual
     time and at construction.
 

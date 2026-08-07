@@ -5,6 +5,10 @@ import pytest
 pytest.importorskip("CoolProp")
 
 from thermowave.components.drum import Drum  # noqa: E402
+from thermowave.components.sink import Sink  # noqa: E402
+from thermowave.components.source import Source  # noqa: E402
+from thermowave.core.exceptions import NetworkTopologyError  # noqa: E402
+from thermowave.core.network import Network  # noqa: E402
 from thermowave.fluids.ideal_gas import IdealGasFluid  # noqa: E402
 from thermowave.fluids.real_fluid import CoolPropFluid  # noqa: E402
 
@@ -418,3 +422,79 @@ def test_state_derivative_does_not_flip_sign_across_the_saturation_boundary():
         )
         signs.add(math.copysign(1.0, d.state_derivative(state)["P"]))
     assert signs == {1.0}, f"dP/dt changed sign across h_f: {signs}"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end regression: a Drum wired into a real Network.solve() (dt=None,
+# the exact mode the singularity this whole file is about only exists in --
+# see Drum's own docstring on level_target). Every test above exercises
+# residuals()/state_derivative() directly against a _FakeState double, which
+# checks the closure's math but never actually runs it through the Newton
+# solver -- this is the test that would have caught the original stall.
+# ---------------------------------------------------------------------------
+
+
+def _steady_drum_network(level_target: float | None):
+    """A minimal steady network: Source -> Drum -> two Sinks (has_riser=False).
+
+    Feed enters well subcooled (430 K at 1 MPa, ~23 K below saturation), so
+    sustaining any steam draw at all needs an external heat input -- there's
+    no riser return here to supply it. heat_loss is set negative (i.e. heat
+    ADDED, per Drum's own doc: "positive = lost") to exactly the value that
+    balances the drum's own mass/energy equations at level_target=0.5 with a
+    0.1/1.9 kg/s steam/water split -- chosen by hand-solving the same 2x2
+    (b1, b2) system Drum.state_derivative() itself solves, not tuned by
+    trial and error against the solver.
+
+    Only P_target and level_target close this drum's own free (P, h) --
+    water_out_mdot is deliberately left None: the steam/water split falls
+    out of the mass/energy balance on its own once h is closed, and adding
+    a third closing residual on top of an already-square 8-unknown system
+    would over-determine it (P_drum, h_drum, and the two outlet mdots are
+    exactly 4 of those unknowns; P_target + level_target + the two
+    automatic steady-state balance equations (state_derivative()==0 for P
+    and h) already close all 4).
+    """
+    P0 = 1.0e6
+    net = Network(fluid=WATER)
+    src = Source(name="src", P=P0, T=430.0, mdot=2.0)
+    drum = Drum(
+        name="drum", V=2.0, P0=P0, fluid=WATER, level0=0.5, has_riser=False,
+        P_target=P0, level_target=level_target, heat_loss=-402371.42020333465,
+    )
+    steam_sink = Sink(name="steam_sink")
+    water_sink = Sink(name="water_sink")
+    for component in (src, drum, steam_sink, water_sink):
+        net.add_component(component)
+    net.connect(src, "out", drum, "feed_in")
+    net.connect(drum, "steam_out", steam_sink, "in")
+    net.connect(drum, "water_out", water_sink, "in")
+    return net, drum
+
+
+def test_level_target_closes_a_real_steady_network_end_to_end():
+    net, drum = _steady_drum_network(level_target=0.5)
+    result = net.solve(progress=False)
+    assert result.converged is True
+
+    from thermowave.core.network import NetworkState
+
+    state = NetworkState(
+        fluid=result.fluid, node_P=result.node_P, node_h=result.node_h,
+        node_mdot=result.node_mdot, params=result.params, node_fluid=result.node_fluid,
+    )
+    metrics = drum.report_metrics(state)
+    assert math.isclose(metrics["level [-]"], 0.5, abs_tol=1e-6)
+
+
+def test_without_level_target_the_same_steady_network_is_not_solvable():
+    # The whole point of level_target: omitting it leaves this drum's own
+    # differential `h` genuinely unclosed (see Drum's docstring) -- here
+    # that shows up as a non-square system (8 unknowns, 7 equations) that
+    # Network.solve() rejects outright, rather than a silent numerical
+    # stall. Either way, it must NOT converge -- this is what pins the
+    # regression test above to level_target specifically, not just "some
+    # working Drum network."
+    net, _drum = _steady_drum_network(level_target=None)
+    with pytest.raises(NetworkTopologyError):
+        net.solve(progress=False)
