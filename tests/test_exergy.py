@@ -229,7 +229,8 @@ def test_condenser_is_costed_as_a_two_stream_exchanger():
     # Condenser names its ports after its two streams (wf_*/cool_*) rather
     # than their temperatures (hot_*/cold_*). It used to fall through every
     # costing branch on that alone -- no E_F/E_P/E_D row at all, silently.
-    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    pytest.importorskip("CoolProp")
+    from thermowave.fluids.real_fluid import CoolPropFluid
     from thermowave.components.condenser import Condenser
 
     water = CoolPropFluid(name="Water")

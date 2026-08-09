@@ -73,7 +73,9 @@ def test_inlet_cp_passes_through_unclamped_for_non_two_phase_fluid():
 
 
 def test_inlet_cp_clamps_to_liquid_side_just_below_saturation():
-    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    pytest.importorskip("CoolProp")
+    from thermowave.fluids.real_fluid import CoolPropFluid
+
     water = CoolPropFluid(name="Water")
     P = 1.0e6
     T_sat = water.saturation_temperature(P)
@@ -88,7 +90,9 @@ def test_inlet_cp_clamps_to_liquid_side_just_below_saturation():
 
 
 def test_inlet_cp_clamps_to_vapor_side_just_above_saturation():
-    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    pytest.importorskip("CoolProp")
+    from thermowave.fluids.real_fluid import CoolPropFluid
+
     water = CoolPropFluid(name="Water")
     P = 1.0e6
     T_sat = water.saturation_temperature(P)
@@ -100,7 +104,9 @@ def test_inlet_cp_clamps_to_vapor_side_just_above_saturation():
 
 
 def test_inlet_cp_unclamped_far_from_saturation_either_side():
-    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    pytest.importorskip("CoolProp")
+    from thermowave.fluids.real_fluid import CoolPropFluid
+
     water = CoolPropFluid(name="Water")
     P = 1.0e6
     T_sat = water.saturation_temperature(P)
@@ -120,7 +126,9 @@ def test_inlet_cp_unclamped_far_from_saturation_either_side():
 
 
 def test_inlet_cp_uses_h_to_resolve_the_exactly_saturated_tie():
-    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    pytest.importorskip("CoolProp")
+    from thermowave.fluids.real_fluid import CoolPropFluid
+
     water = CoolPropFluid(name="Water")
     P = 1.0e6
     T_sat = water.saturation_temperature(P)
