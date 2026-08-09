@@ -15,7 +15,9 @@ WHAT THIS COVERS
 - Per-component fuel/product/destruction (E_F, E_P, E_D) costing for the
   component types where "what's fuel and what's product" is unambiguous
   from the component's own physics: turbines/compressors/pumps (work
-  producers/consumers) and the two-stream heat exchangers. Dispatched by
+  producers/consumers) and the two-stream heat exchangers, Condenser
+  included (its wf_in/wf_out side is the hot/fuel side, cool_in/cool_out
+  the cold/product side). Dispatched by
   isinstance, not report_category() -- see _cost_component()'s own
   docstring for why (Turbine and Compressor share report_category() ==
   "turbomachinery" but have opposite fuel/product roles report_category()
@@ -48,6 +50,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from thermowave.components.compressor import Compressor
+from thermowave.components.condenser import Condenser
 from thermowave.components.electric_motor import ElectricMotor
 from thermowave.components.generator import Generator
 from thermowave.components.heat_exchanger import HeatExchanger, MultiPassHeatExchanger
@@ -70,9 +73,21 @@ if TYPE_CHECKING:
 
 _EXPANDERS = (Turbine, SimpleTurbine, SteamTurbine)  # work OUT is the product
 _COMPRESSION = (Compressor, SimpleCompressor, Pump)  # work IN is the fuel
-_TWO_STREAM_HX = (HeatExchanger, MultiPassHeatExchanger)  # MultiPassHeatExchanger is a
-# HeatExchanger subclass, so isinstance already covers it -- listed explicitly for clarity.
-# The single-stream SimpleHeatExchanger is NOT here: it has no hot_in/cold_in ports.
+_TWO_STREAM_HX = (HeatExchanger, MultiPassHeatExchanger, Condenser)  # MultiPassHeatExchanger
+# is a HeatExchanger subclass, so isinstance already covers it -- listed explicitly for
+# clarity. The single-stream SimpleHeatExchanger is NOT here: it has no two streams to
+# split into a hot/fuel and a cold/product side at all.
+#
+# Condenser IS a two-stream exchanger and costs identically (fuel = the hot side's exergy
+# drop, product = the cold side's exergy rise); it just names its ports after its two
+# streams' roles rather than their temperatures. Costing it is not optional cosmetics: it
+# was previously falling through every branch here silently -- no E_F/E_P/E_D row, no
+# contribution to the network totals, no warning -- which in the SEGS benchmark quietly
+# dropped the plant's single largest heat-rejection component (58.3 MW) out of the balance.
+_DEFAULT_TWO_STREAM_PORTS = ("hot_in", "hot_out", "cold_in", "cold_out")
+_TWO_STREAM_PORTS: dict[type, tuple[str, str, str, str]] = {
+    Condenser: ("wf_in", "wf_out", "cool_in", "cool_out"),
+}
 _POWER_ONLY = (Shaft, ShaftLoad, ElectricMotor, Generator, SimpleGenerator)
 _SINGLE_STREAM_PHASE_CHANGE_PORTS = ("in", "out")  # SimpleEvaporator/SimpleCondenser
 
@@ -180,6 +195,18 @@ def _E_PH(state: "NetworkState", node: str, T0: float, P0: float) -> float:
     return E
 
 
+def _two_stream_port_names(component: "BaseComponent") -> tuple[str, str, str, str]:
+    """(hot_in, hot_out, cold_in, cold_out) port ids for a two-stream
+    exchanger, as ITS OWN class names them. The costing itself is identical
+    across these types -- fuel is the hot side's exergy drop, product the
+    cold side's rise -- so only the four port ids vary, and they're looked
+    up here rather than hardcoded at the one call site."""
+    for cls, names in _TWO_STREAM_PORTS.items():
+        if isinstance(component, cls):
+            return names
+    return _DEFAULT_TWO_STREAM_PORTS
+
+
 def _cost_component(
     component: "BaseComponent",
     state: "NetworkState",
@@ -219,13 +246,14 @@ def _cost_component(
         return _finish_cost(E_F, E_P, component.name)
 
     if isinstance(component, _TWO_STREAM_HX):
-        E_hot_in = _E_PH(state, ports["hot_in"], T0, P0)
-        E_hot_out = _E_PH(state, ports["hot_out"], T0, P0)
+        hot_in, hot_out, cold_in, cold_out = _two_stream_port_names(component)
+        E_hot_in = _E_PH(state, ports[hot_in], T0, P0)
+        E_hot_out = _E_PH(state, ports[hot_out], T0, P0)
         E_F = E_hot_in - E_hot_out
         if component.name in dissipative:
             return ComponentExergyCost(E_F=E_F, E_P=None, E_D=None, epsilon=None)
-        E_cold_in = _E_PH(state, ports["cold_in"], T0, P0)
-        E_cold_out = _E_PH(state, ports["cold_out"], T0, P0)
+        E_cold_in = _E_PH(state, ports[cold_in], T0, P0)
+        E_cold_out = _E_PH(state, ports[cold_out], T0, P0)
         E_P = E_cold_out - E_cold_in
         return _finish_cost(E_F, E_P, component.name)
 
@@ -357,7 +385,7 @@ def exergy_report(
         if target is None or not isinstance(target, _TWO_STREAM_HX):
             raise ValueError(
                 f"exergy_report(dissipative=...) names {name!r}, but that isn't a "
-                f"HeatExchanger/MultiPassHeatExchanger component in this network."
+                f"HeatExchanger/MultiPassHeatExchanger/Condenser component in this network."
             )
 
     state = result.state()

@@ -225,6 +225,47 @@ def test_two_stream_hx_dissipative_has_no_product_and_feeds_e_l_not_e_d():
     assert report.E_D == 0.0  # nothing else in this tiny network is costed
 
 
+def test_condenser_is_costed_as_a_two_stream_exchanger():
+    # Condenser names its ports after its two streams (wf_*/cool_*) rather
+    # than their temperatures (hot_*/cold_*). It used to fall through every
+    # costing branch on that alone -- no E_F/E_P/E_D row at all, silently.
+    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    from thermowave.components.condenser import Condenser
+
+    water = CoolPropFluid(name="Water")
+    wf_src = Source(name="wf_src", P=1.0e5, T=400.0, mdot=1.0)
+    cool_src = Source(name="cool_src", P=2.0e5, T=300.0, mdot=40.0)
+    cd = Condenser(name="cd", outlet_quality=0.0)
+    wf_snk = Sink(name="wf_snk")
+    cool_snk = Sink(name="cool_snk")
+
+    net = Network(fluid=water)
+    for c in (wf_src, cool_src, cd, wf_snk, cool_snk):
+        net.add_component(c)
+    net.connect(wf_src, "out", cd, "wf_in")
+    net.connect(cd, "wf_out", wf_snk, "in")
+    net.connect(cool_src, "out", cd, "cool_in")
+    net.connect(cd, "cool_out", cool_snk, "in")
+    result = net.solve(tol=1e-6, max_iter=200, progress=False)
+    assert result.converged
+
+    report = exergy_report(result, T0, P0, fuel=[0.0], product=[0.0])
+    cost = report.component_costs["cd"]
+    assert cost is not None
+    state = result.state()
+    expected_E_F = (
+        node_exergy(state, "cd.wf_in", T0, P0).E_PH - node_exergy(state, "cd.wf_out", T0, P0).E_PH
+    )
+    expected_E_P = (
+        node_exergy(state, "cd.cool_out", T0, P0).E_PH
+        - node_exergy(state, "cd.cool_in", T0, P0).E_PH
+    )
+    assert math.isclose(cost.E_F, expected_E_F, rel_tol=1e-9)
+    assert math.isclose(cost.E_P, expected_E_P, rel_tol=1e-9)
+    assert cost.E_D is not None and cost.E_D > 0.0
+    assert cost.epsilon is not None
+
+
 def test_dissipative_rejects_non_two_stream_hx_name():
     src = Source(name="src", P=101325.0, T=400.0, mdot=1.0)
     snk = Sink(name="snk")
