@@ -282,7 +282,7 @@ Actual printed output from `python segs_exergy_benchmark.py`:
 
 ```
 eco       UA=4.5286e+05 W/K  Q= 13.094 MW  T_hot:  316.0 ->  300.0 C   T_cold:  234.0 ->  301.0 C
-eva       UA=4.2891e+06 W/K  Q= 53.194 MW  T_hot:  378.0 ->  316.0 C   T_cold:  311.0 ->  311.0 C
+eva       UA=5.8109e+06 W/K  Q= 53.194 MW  T_hot:  378.0 ->  316.0 C   T_cold:  311.0 ->  311.0 C
 sup       UA=2.0363e+05 W/K  Q= 10.701 MW  T_hot:  390.0 ->  378.0 C   T_cold:  311.0 ->  371.0 C
 reheater  UA=3.7102e+05 W/K  Q= 15.818 MW  T_hot:  390.0 ->  261.7 C   T_cold:  208.7 ->  371.0 C
 drum      P=99.978 bar  T_sat=311.0 C  level=0.500
@@ -395,8 +395,17 @@ figures, and this is disclosed rather than glossed over: those two paper
 figures are computed against a *wider* system boundary — **solar-absorbed
 power**, not boiler+reheat duty — and *net* subtracts the HTF pump and
 cooling-tower pump/fan parasitics (Table 2: 1.56 + 0.99 MWe) on top of the
-condensate/feed pumps, none of which this benchmark's scope models (see
-"Scope" in the script's own module docstring). This benchmark's 38.9%
+condensate/feed pumps. Of those, only the **HTF (solar-field oil)
+circulation pump** is genuinely outside this benchmark's scope — the solar
+field that pump serves isn't modeled at all (see "Scope" in the script's
+own module docstring). The cooling-water pump (`cwp`, 60 kW) and
+cooling-tower fan (`fan`, 828 kW) *are* modeled components with their own
+solved power and their own exergy rows below; they're simply not
+subtracted from the printed net-power figure, for the same reason the
+condensate/feed pumps aren't compared head-to-head with Table 2 either —
+Table 2's parasitics are *electrical* figures that include a motor
+efficiency `Pump`/`SimpleCompressor` don't model, so the shaft power
+computed here isn't the same quantity. This benchmark's 38.9%
 steam-cycle figure and the paper's 38.2% gross-electric figure are
 answering two different, if related, questions — both given here rather
 than picking one and calling it the same number.
@@ -428,6 +437,7 @@ lpt2               │     7.108e+06│     6.692e+06│     4.154e+05│       
 lpt3               │     5.324e+06│     5.044e+06│     2.804e+05│         94.73
 lpt4               │     5.043e+06│     4.506e+06│     5.369e+05│         89.35
 lpt5               │     4.537e+06│     2.979e+06│     1.557e+06│         65.67
+condenser          │     3.059e+06│     2.219e+06│     8.403e+05│         72.53
 condensatePump     │     3.887e+04│     2.828e+04│     1.059e+04│         72.76
 cwp                │     6.012e+04│     4.264e+04│     1.748e+04│         70.93
 ct                 │     2.261e+06│          8413│     2.253e+06│         0.372
@@ -441,8 +451,40 @@ hpPreheater2_cold  │     2.341e+06│     2.188e+06│     1.524e+05│       
 
 Network
        E_F [W]│       E_P [W]│       E_D [W]│       E_L [W]│   epsilon [%]
-     5.108e+07│     3.545e+07│     1.181e+07│             0│          69.4
+     5.108e+07│     3.545e+07│     1.265e+07│             0│          69.4
 ```
+
+**The network-level balance does not close, and that's disclosed here
+rather than left for a reader to discover.** A closed exergy balance would
+have `E_P + E_D + E_L = E_F`; this run gives 35.45 + 12.65 + 0 = 48.10 MW
+against `E_F` = 51.08 MW, a **2.99 MW (5.8%) gap**. Two known, separate
+causes account for it, neither of which is a solver or a component error:
+
+1. **The network-level `fuel` is a Carnot approximation; the component
+   rows are native.** The `fuel=[...]` passed to `exergy_report()` costs
+   the boiler and reheat heat input as `Q * (1 - T0/T_HTF)` at a single
+   HTF supply temperature — kept for continuity with how the FWH cold
+   sides are costed via `source_temperatures`. The `eco`/`eva`/`sup`/
+   `reheater` rows in the component table are *not* computed that way any
+   more: they're genuine two-stream `HeatExchanger`s now, so
+   `exergy_report()` costs them natively from the real oil stream's own
+   exergy drop. The two numbers no longer reconcile, and the
+   network-level fuel runs the higher of the two. Costing the
+   network-level fuel natively from the oil stream as well would remove
+   this term; that's a natural follow-up, not done here.
+2. **`fan` and `cwp` shaft work enters `E_D` with no matching `E_F`
+   entry.** Both are real modeled components whose destroyed exergy is
+   tallied into the network `E_D` total, but the electrical work driving
+   them is not declared as a network-level fuel stream, so it appears on
+   the destruction side of the balance only.
+
+The per-component rows themselves each balance individually (`E_F = E_P +
+E_D` within rounding for every row above); the gap is entirely in how the
+*network-level* `fuel`/`product` totals are declared against them. Note
+also that `E_L` is 0 because no component is marked `dissipative=[...]`
+in this benchmark — the `condenser`'s heat rejection is costed as a
+normal fuel/product pair (its cooling water genuinely carries the exergy
+onward to `ct`) rather than being written off as a loss.
 
 `lpt5`'s low 65.67% exergetic efficiency still tracks directly from Table
 3's own low `etas0 = 0.6445` for that stage — the paper's own EASY model
@@ -477,8 +519,8 @@ unexplained discrepancies.
 
 The new boiler-internals (economizer/drum/evaporator/superheater/
 reheater) and cooling-water-loop/cooling-tower subsystems both converge
-cleanly as part of the same full-plant solve (42 iterations, residual
-8.2e-08) — there's no separate pass/fail gate for them, since they're
+cleanly as part of the same full-plant solve (44 iterations, residual
+8.9e-08) — there's no separate pass/fail gate for them, since they're
 wired into the one `Network.solve()` this whole benchmark already runs.
 Since Lippke's Table 3 has no design data for either subsystem, they're
 checked against TESPy's own published `SEGS_exergy-main/README.md`
