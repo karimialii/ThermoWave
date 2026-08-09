@@ -32,36 +32,101 @@ to its own repo later.)
 7-stage steam turbine train (2 HP stages, 5 LP stages with one reheat
 between HP and LP), 5 regenerative feedwater heaters fed by fixed turbine
 extractions with a condensate drain cascade, one open feedwater heater
-(deaerator), 2 pumps. The oil-heated boiler and reheater (the solar
-field's own boundary with the water/steam side) aren't modeled in detail —
-Fig. 4 gives both endpoints' design temperature *and* pressure directly —
-but unlike the
+(deaerator), 2 pumps, a real economizer/drum/evaporator/superheater boiler
+and two-stream reheater fed by an oil HTF loop, and a real closed
+cooling-water loop through a cooling tower. Unlike the
 [`sco2_recompression`](../sco2_recompression/sco2_recompression_benchmark.md)
-benchmark's own external heater/cooler treatment, this network is a
-**genuinely closed loop**: no `Source`, no `Sink`. Each crossing is a
-[`SimpleEvaporator`](../../components/heat-exchangers/evaporator.md)
-(`boiler`, `reheater`) whose outlet target is exactly the same published
-Fig. 4 value a `Source` used to assert directly, wired as a real component
-fed from the water/steam cycle's own returning stream instead of an
-external boundary — and a single
-[`Recycle`](../../components/flow-elements/recycle.md) anchors the whole
-loop's mass-flow scale (38.6415 kg/s, Table 3's own boiler-outlet mdot).
-See the script's own module docstring for the full topology diagram and
-the exact port wiring.
+benchmark's own external heater/cooler treatment, the water/steam network
+is a **genuinely closed loop**: no `Source`, no `Sink` on that side. A
+single [`Recycle`](../../components/flow-elements/recycle.md) anchors the
+whole loop's mass-flow scale (38.6415 kg/s, Table 3's own boiler-outlet
+mdot). See the script's own module docstring for the full topology
+diagram and the exact port wiring.
 
-**Why `SimpleEvaporator`, not a fixed `PR`:** the boiler's incoming
+**Boiler internals: a real economizer → drum → evaporator → superheater
+chain, not a single boundary-crossing `SimpleEvaporator`.** An earlier
+version of this benchmark treated the boiler and reheater exactly like
+the `sco2_recompression` benchmark treats its own external heater/cooler:
+a single `SimpleEvaporator` per crossing, its outlet (T, P) asserted
+directly from Lippke's Fig. 4 design heat balance, standing in for the
+unmodeled solar field. That's honest about *what* it's not modeling, but
+it throws away real structure Fig. 4 doesn't need asserted — the actual
+oil-fired boiler has an economizer, a natural-circulation drum/evaporator
+riser, and a superheater in series, each with its own duty and
+temperature profile, fed by an oil HTF stream that's real thermodynamic
+fluid, not an assumed endpoint. This is now modeled directly:
+[`HeatExchanger`](../../components/heat-exchangers/heat-exchanger.md)
+components `eco`, `eva`, and `sup` (each a genuine two-stream oil/water
+exchanger, `UA` solved by a `Setpoint` against the design outlet
+temperature) plus a [`Drum`](../../components/heat-exchangers/drum.md)
+closing the natural-circulation riser loop, all fed by their own
+`Source(fluid=INCOMP::TVP1)`/`Sink` oil boundary standing in for the
+still-unmodeled solar field. The `reheater` is likewise now a real
+two-stream `HeatExchanger` (oil hot side, steam cold side) instead of a
+single-stream `SimpleEvaporator`. A first attempt at this subsystem was
+tried and abandoned in an earlier session — correctly wired (verified
+square: equal unknowns/equations at both the full-network and an
+isolated-subsystem level) but with a residual that dropped smoothly for
+~25 iterations then jumped two orders of magnitude, repeatably, even in a
+small isolated boiler-only subsystem with a good warm start — the
+signature of a discontinuous residual near the solution. That turned out
+to be a `cp()` branch discontinuity right at the saturation boundary
+inside `HeatExchanger`; fixing it (see the `Drum`'s own differential-`h`
+closure) is what let this subsystem converge for good. Both the boiler's
+and reheater's water-side outlet targets (100 bar/371 C, 17.1 bar/371 C)
+are exactly the same published Fig. 4 values the old `SimpleEvaporator`s
+used to assert directly — now *reached*, by `Setpoint`s closing each
+`HeatExchanger`'s `UA`, rather than asserted.
+
+**Why `PR_cold=1.0`, not a fixed target `PR`:** the boiler's incoming
 pressure isn't `feedPump`'s raw 104.1 bar `P_out` — it's that value carried
 through two more `PR=0.98` drops (`hpPreheater1_cold`, `hpPreheater2_cold`)
-first, landing around 99.98 bar by the time it actually reaches the
-boiler. Rather than compound a third, separately-invented `PR` guess on
-top of that chain to force exactly 100 bar, the boiler uses `PR=1.0`
-(isobaric — `SimpleEvaporator`'s own default, "boilers are ~isobaric"):
-99.98 bar is already within 0.02% of the published 100 bar, so this is
-both the more honest choice and the more accurate one. The reheater
-doesn't have this problem — its inlet (`hpt2`'s own `P_out`, 18.58 bar) is
-an independent absolute anchor, not compounded through other components'
-ratios, so `PR = 17.1 / 18.58` (both already-published Table 3 pressures)
-lands on the target exactly.
+first, landing around 99.98 bar by the time it actually reaches `eco`.
+Rather than compound a third, separately-invented `PR` guess on top of
+that chain to force exactly 100 bar, `eco`/`eva`/`sup` all use
+`PR_cold=1.0` (isobaric water side, matching the old `SimpleEvaporator`'s
+own default): 99.98 bar is already within 0.02% of the published 100 bar,
+so this is both the more honest choice and the more accurate one. The
+reheater doesn't have this problem — its inlet (`hpt2`'s own `P_out`,
+18.58 bar) is an independent absolute anchor, not compounded through
+other components' ratios, so `PR_cold = 17.1 / 18.58` (both
+already-published Table 3 pressures) lands on the target exactly.
+
+**Cooling-water loop / cooling tower: a real closed loop, not an
+unmodeled heat sink.** The condenser previously rejected its duty to
+nothing in particular — a single-stream `SimpleCondenser` with no
+explicit cooling-water or cooling-tower loop at all. It's now a
+two-stream [`Condenser`](../../components/heat-exchangers/condenser.md)
+(`wf` = steam/water side, `cool` = cooling-water side), whose cooling-water
+side closes through its own
+[`Recycle`](../../components/flow-elements/recycle.md) (`cw_recycle`,
+entirely separate from the water/steam `Recycle` — the two loops meet
+only inside `Condenser`'s own two-stream heat transfer) into a `cwp` pump
+and a cooling tower (`ct`, an air-cooled two-stream `HeatExchanger`), fed
+by its own `Source(fluid=air)`/`Sink` dry-air boundary (`air_src`/
+`air_sink`) through a `fan` (`SimpleCompressor`). `ct`'s `UA` is fixed —
+precomputed once from a target condenser pinch margin (see
+`_design_ct_UA()`'s own docstring) — rather than left as a free `Setpoint`
+target against the air-side outlet temperature, because that outlet
+temperature is nearly invariant to `UA` in this topology (set almost
+entirely by the air mass-flow sizing instead), which produces a
+near-singular Jacobian if a `Setpoint` tries to close on it (confirmed by
+SVD analysis: smallest singular value ~0 to double precision). This
+matches TESPy's own `SEGS.py` cooling-tower treatment: a plain
+liquid-water/dry-air two-stream exchanger, no humidity or evaporative
+mass transfer modeled on either side.
+
+Several of this subsystem's sizing constants are disclosed placeholders,
+not solved or published values: `RISER_RATIO=4.0` (a standard
+natural-circulation recirculation ratio, 3–6:1 is typical), `CW_MDOT`/
+`AIR_MDOT` (sized from a placeholder condenser duty and design
+temperature-rise assumptions, not a solved value), and `FAN_PR` (matched
+to TESPy's own `SEGS.py` fan boost). `OIL_MDOT` looks like one too but
+isn't — it's only a warm-start *guess*; the real oil circulation rate is
+a free unknown, solved for by the evaporator's own 5 K pinch `Setpoint`
+(`oil_src` itself has `mdot=None`), landing at ~404 kg/s. See
+`docs/superpowers/specs/2026-08-06-segs-full-plant-design.md` for the
+full degrees-of-freedom rationale behind each of these.
 
 **Every extraction/split fraction is fixed, not solved for.** Table 3's
 own turbine `mFeed0` sequence hands over the exact design-point extraction
@@ -204,6 +269,89 @@ cost of that simplification (no shared UA ties the two sides here) —
 `hpPreheater1` (fed by a mixed/merged drain stream, closest to the
 deaerator's own known saturation state) lands closest.
 
+### Boiler internals (economizer/evaporator/superheater/reheater)
+
+Lippke's own Table 3 doesn't cover economizer/evaporator/superheater/
+reheater design values at all — Fig. 4 only gives the boiler/reheater's
+*endpoints*, not their internal split. So this is a **TESPy cross-check,
+not a Lippke one**: the comparison target is TESPy's own published
+`SEGS_exergy-main/README.md` (`docs/benchmark/Tespy Benchmark/
+SEGS_exergy-main/README.md`), which models this same subsystem in detail.
+
+Actual printed output from `python segs_exergy_benchmark.py`:
+
+```
+eco       UA=4.5286e+05 W/K  Q= 13.094 MW  T_hot:  316.0 ->  300.0 C   T_cold:  234.0 ->  301.0 C
+eva       UA=4.2891e+06 W/K  Q= 53.194 MW  T_hot:  378.0 ->  316.0 C   T_cold:  311.0 ->  311.0 C
+sup       UA=2.0363e+05 W/K  Q= 10.701 MW  T_hot:  390.0 ->  378.0 C   T_cold:  311.0 ->  371.0 C
+reheater  UA=3.7102e+05 W/K  Q= 15.818 MW  T_hot:  390.0 ->  261.7 C   T_cold:  208.7 ->  371.0 C
+drum      P=99.978 bar  T_sat=311.0 C  level=0.500
+oil mdot  404.06 kg/s (free unknown, sized by eva's ttd_l=5 pinch; warm-start guess was 382.07)
+
+boiler duty:   76.989 MW
+reheater duty: 15.818 MW
+```
+
+`sup`'s and `reheater`'s `T_cold_out` land exactly on the 371 C Fig. 4
+target (both closed by a `Setpoint` against that value, see "The cycle"
+above) — a tight-convergence check, not a boundary-hit artifact.
+`eco`/`eva`'s targets are TESPy-derived pinch/approach assumptions
+(ttd_l=5 K, 10 K approach), not published Lippke values, so there's no
+external number to check those two against directly.
+
+Each component's own **exergy** figures (`E_F`/`E_P`/`ε`, costed natively
+from the real oil stream now that it's a genuine two-stream
+`HeatExchanger` — see "EXERGY FUEL DEFINITION" in the script's module
+docstring) line up closely with TESPy's own per-component table:
+
+```
+component    ThermoWave E_F/E_P/eps [MW/MW/%]   TESPy E_F/E_P/eps [MW/MW/%]
+eco                    6.39 / 5.88 / 92.1                7.52 / 6.99 / 93.0
+eva                   27.62 / 26.04 / 94.3               26.55 / 25.08 / 94.5
+sup                    5.86 / 5.47 / 93.5                6.05 / 5.53 / 91.4
+reheater               7.94 / 6.73 / 84.8                8.11 / 6.88 / 84.9
+```
+
+Close but not identical — expected, since ThermoWave's boiler internals
+use disclosed placeholder sizing (`RISER_RATIO`, the economizer/evaporator
+approach temperatures) rather than TESPy's own independently-chosen
+design point, and the two models' oil circulation rates are each their
+own free unknown, not forced to match. The efficiencies (`ε`) track TESPy's
+own within a couple of points across all four components, and `eva`'s duty
+(53.2 MW here vs. TESPy's own comparable ballpark) dominates the boiler's
+total heat input in both models, as expected for the phase-change stage.
+
+### Cooling tower
+
+Same disclosure as above: Lippke's Table 3 has no cooling-tower design
+data, so this is a TESPy cross-check against `SEGS_exergy-main/README.md`,
+not a Lippke one.
+
+Actual printed output:
+
+```
+condenser  Q= 58.303 MW   pinch=1.98 K   (TESPy: E_F=3.07 MW, E_P=1.56 MW)
+ct         Q= 58.363 MW   T_hot_out=  34.5 C   T_cold_out=  30.1 C   (TESPy: E_F=2.07 MW, E_P=0.49 MW)
+```
+
+`condenser`'s duty (58.3 MW) and `ct`'s duty (58.4 MW) agree with each
+other to within 0.1% — the expected outcome of a closed cooling-water loop
+carrying essentially the same heat from one to the other, with only `cwp`'s
+small pump work added in between. `condenser`'s pinch (1.98 K) sits just
+under the 2 K target `_design_ct_UA()` was sized against — `ct`'s `UA` is a
+fixed, precomputed value (not a free `Setpoint`, see "The cycle" above),
+so a small pinch shortfall like this is an expected consequence of sizing
+UA once rather than solving it to hit the target exactly. TESPy's own
+published `E_F`/`E_P` figures for its Condenser (3.07/1.56 MW) and Cooling
+tower (2.07/0.49 MW) are shown alongside for reference, not a strict
+apples-to-apples check: `ct`'s own per-component exergy costing here
+(`ε` ≈ 0.4% in the printed exergy report) isn't directly comparable to
+TESPy's 23.6% — the two models define `E_P` for an open, ambient-venting
+air stream differently (see `PR_COLD_CT`'s own comment in the module
+docstring for why ThermoWave costs the air side the way it does), so the
+duty/pinch figures above, not the exergy efficiency, are this section's
+real cross-check.
+
 ### Pump parasitics
 
 ```
@@ -298,6 +446,24 @@ pump-parasitic shortfall are both disclosed, understood simplifications
 (a precomputed TTD-based cold-side duty instead of a shared-UA model; a
 placeholder pump discharge pressure instead of a derived one) — not
 unexplained discrepancies.
+
+The new boiler-internals (economizer/drum/evaporator/superheater/
+reheater) and cooling-water-loop/cooling-tower subsystems both converge
+cleanly as part of the same full-plant solve (42 iterations, residual
+8.2e-08) — there's no separate pass/fail gate for them, since they're
+wired into the one `Network.solve()` this whole benchmark already runs.
+Since Lippke's Table 3 has no design data for either subsystem, they're
+checked against TESPy's own published `SEGS_exergy-main/README.md`
+numbers instead (see "Boiler internals" and "Cooling tower" above): the
+four boiler-internals components' own exergy efficiencies land within a
+couple of points of TESPy's own (92.1/94.3/93.5/84.8% here vs.
+93.0/94.5/91.4/84.9% there), and the condenser/cooling-tower duties agree
+with each other to within 0.1% across the closed cooling-water loop. This
+is a looser cross-check than the Table 3 turbine/mass-balance comparisons
+above — TESPy and this benchmark are two independently-parameterized
+models of the same subsystem, not the same published numbers reproduced
+exactly — but it's the strongest check available for a subsystem Lippke's
+own paper never published design data for.
 
 ## Regenerating the plots
 

@@ -82,7 +82,10 @@ def main() -> None:
     plot_turbine_stage_power(c, result, OUT_DIR / "turbine_stage_power.png")
 
     # --- exergy report, same fuel/product definition as the main script ---
-    q_boiler_w = c["boiler"].report_metrics(state)["power [W]"]
+    # "boiler" used to be a single SimpleEvaporator; it's now the real
+    # eco/eva/sup chain (see segs_exergy_benchmark.py's own module
+    # docstring), so its duty is their three duties summed.
+    q_boiler_w = sum(c[name].report_metrics(state)["power [W]"] for name in ("eco", "eva", "sup"))
     q_reheat_w = c["reheater"].report_metrics(state)["power [W]"]
 
     gross_mech_w = sum(c[name].report_metrics(state)["power [W]"] for name in TURBINES)
