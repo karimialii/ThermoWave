@@ -19,10 +19,10 @@ _CP_SAT_NUDGE_K = 0.05  # K, how far off the saturation curve _inlet_cp clamps t
 _ARRANGEMENTS = ("counterflow", "parallel", "crossflow", "shell_and_tube", "custom")
 
 
-def _inlet_cp(fluid: "BaseFluid", P: float, T: float) -> float:
+def _inlet_cp(fluid: "BaseFluid", P: float, T: float, h: Optional[float] = None) -> float:
     """cp(P, T), clamped at least _CP_SAT_NUDGE_K off the saturation
-    temperature for two-phase-capable fluids -- toward whichever side T
-    already sits on (liquid if T < T_sat, vapor if T >= T_sat), so a
+    temperature for two-phase-capable fluids -- toward whichever side the
+    state actually sits on (liquid or vapor), so a
     legitimately-superheated-vapor inlet elsewhere never gets silently
     treated as subcooled liquid. A real boiler drum's own downcomer
     (Drum.water_out) is ALWAYS exactly saturated liquid by construction --
@@ -47,6 +47,26 @@ def _inlet_cp(fluid: "BaseFluid", P: float, T: float) -> float:
     genuinely differs liquid vs. vapor) but it's now fixed to a small,
     whole nudge band on the physically-correct side, not an unpredictable
     ~1e-4%-wide sliver that could land on either.
+
+    WHICH side, though, cannot be decided from T alone at T == T_sat
+    exactly. Saturated liquid and saturated vapor at the same pressure have
+    the SAME temperature -- T_sat -- so the two physically opposite states
+    are indistinguishable in (P, T), and an earlier version's `T_sat <= T`
+    tie-break silently resolved both of them to the VAPOR side. That is
+    exactly wrong for the case this clamp exists to serve: Drum.water_out is
+    saturated LIQUID by construction, and at the SEGS drum's own pressure
+    (~99.98 bar) temperature_ph(P, h_f) returns exactly T_sat, so the
+    evaporator's cold-side C was built from the vapor cp (~7128 J/(kg K))
+    instead of the liquid cp (~6120 J/(kg K)) -- a ~16% error in Cmin, and
+    hence in NTU and the duty.
+
+    `h` is the caller's own inlet enthalpy at the same node, and it IS
+    enough to disambiguate: h_f(P) and h_g(P) differ by the whole latent
+    heat, so comparing h against them names the phase unambiguously where T
+    cannot (below h_f -> liquid, above h_g -> vapor, inside the dome ->
+    whichever boundary the state is nearer, since cp is meaningless there
+    anyway). It is optional only so a caller with no enthalpy on hand still
+    gets the old T-based behavior; every call site in this module passes it.
     """
     if supports_two_phase(fluid):
         try:
@@ -57,12 +77,37 @@ def _inlet_cp(fluid: "BaseFluid", P: float, T: float) -> float:
             # an incompressible/liquid-only fluid (e.g. INCOMP::TVP1 oil) has no
             # saturation curve to clamp away from at all; nothing to do here.
             T_sat = None
-        if T_sat is not None:
-            if T_sat - _CP_SAT_NUDGE_K < T < T_sat:
-                T = T_sat - _CP_SAT_NUDGE_K
-            elif T_sat <= T < T_sat + _CP_SAT_NUDGE_K:
-                T = T_sat + _CP_SAT_NUDGE_K
+        if T_sat is not None and T_sat - _CP_SAT_NUDGE_K < T < T_sat + _CP_SAT_NUDGE_K:
+            vapor = _is_vapor_side(fluid, P, T, T_sat, h)
+            T = T_sat + (_CP_SAT_NUDGE_K if vapor else -_CP_SAT_NUDGE_K)
     return fluid.cp(P, T)
+
+
+def _is_vapor_side(
+    fluid: "BaseFluid", P: float, T: float, T_sat: float, h: Optional[float]
+) -> bool:
+    """True if the state is on the vapor side of the dome. Uses h when the
+    caller has it (the only way to tell saturated liquid from saturated
+    vapor, which share T == T_sat exactly); falls back to T's own side of
+    T_sat otherwise, with T == T_sat resolving to vapor as it historically
+    did."""
+    if h is not None:
+        try:
+            h_f = fluid.saturated_liquid_enthalpy(P)
+            h_g = fluid.saturated_vapor_enthalpy(P)
+        except FluidRangeError:
+            # No dome at this pressure (e.g. supercritical) -- same guard as
+            # saturation_temperature above; fall through to the T-based test.
+            h_f = h_g = None
+        if h_f is not None and h_g is not None:
+            if h <= h_f:
+                return False
+            if h >= h_g:
+                return True
+            # Genuinely inside the dome: cp is undefined there, so take the
+            # nearer boundary rather than an arbitrary fixed side.
+            return (h - h_f) > (h_g - h)
+    return T >= T_sat
 
 
 class HeatExchanger(BaseComponent):
@@ -385,8 +430,8 @@ class HeatExchanger(BaseComponent):
 
         mdot_hot = state.mdot(self._hot_in_node)
         mdot_cold = state.mdot(self._cold_in_node)
-        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in)
-        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in)
+        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in, h_hot_in)
+        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in, h_cold_in)
 
         C_hot = max(mdot_hot * cp_hot, _MIN_C)
         C_cold = max(mdot_cold * cp_cold, _MIN_C)
@@ -445,8 +490,8 @@ class HeatExchanger(BaseComponent):
 
         mdot_hot = state.mdot(self._hot_in_node)
         mdot_cold = state.mdot(self._cold_in_node)
-        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in)
-        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in)
+        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in, h_hot_in)
+        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in, h_cold_in)
 
         C_hot = max(mdot_hot * cp_hot, _MIN_C)
         C_cold = max(mdot_cold * cp_cold, _MIN_C)
@@ -501,8 +546,8 @@ class HeatExchanger(BaseComponent):
             P_cold_a, h_cold_a = state.node(cold_a)
             T_hot_a = hot_fluid.temperature_ph(P_hot_a, h_hot_a)
             T_cold_a = cold_fluid.temperature_ph(P_cold_a, h_cold_a)
-            cp_hot = _inlet_cp(hot_fluid, P_hot_a, T_hot_a)
-            cp_cold = _inlet_cp(cold_fluid, P_cold_a, T_cold_a)
+            cp_hot = _inlet_cp(hot_fluid, P_hot_a, T_hot_a, h_hot_a)
+            cp_cold = _inlet_cp(cold_fluid, P_cold_a, T_cold_a, h_cold_a)
 
             C_hot = max(mdot_hot * cp_hot, _MIN_C)
             C_cold = max(mdot_cold * cp_cold, _MIN_C)
@@ -542,8 +587,8 @@ class HeatExchanger(BaseComponent):
 
         mdot_hot = state.mdot(self._hot_in_node)
         mdot_cold = state.mdot(self._cold_in_node)
-        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in)
-        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in)
+        cp_hot = _inlet_cp(hot_fluid, P_hot_in, T_hot_in, h_hot_in)
+        cp_cold = _inlet_cp(cold_fluid, P_cold_in, T_cold_in, h_cold_in)
         C_min = self._smooth_min(max(mdot_hot * cp_hot, _MIN_C), max(mdot_cold * cp_cold, _MIN_C))
         Q_max = C_min * (T_hot_in - T_cold_in)
 

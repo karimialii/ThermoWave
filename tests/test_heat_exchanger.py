@@ -119,6 +119,25 @@ def test_inlet_cp_unclamped_far_from_saturation_either_side():
     )
 
 
+def test_inlet_cp_uses_h_to_resolve_the_exactly_saturated_tie():
+    CoolPropFluid = pytest.importorskip("thermowave.fluids.real_fluid").CoolPropFluid
+    water = CoolPropFluid(name="Water")
+    P = 1.0e6
+    T_sat = water.saturation_temperature(P)
+    h_f = water.saturated_liquid_enthalpy(P)
+    h_g = water.saturated_vapor_enthalpy(P)
+
+    # Both states sit at exactly T == T_sat -- indistinguishable in (P, T) --
+    # so only h can say which side each is on. Saturated liquid must resolve
+    # to the liquid-side cp, saturated vapor to the vapor-side cp.
+    cp_liquid = water.cp(P, T_sat - _CP_SAT_NUDGE_K)
+    cp_vapor = water.cp(P, T_sat + _CP_SAT_NUDGE_K)
+    assert math.isclose(_inlet_cp(water, P, T_sat, h_f), cp_liquid, rel_tol=1e-12)
+    assert math.isclose(_inlet_cp(water, P, T_sat, h_g), cp_vapor, rel_tol=1e-12)
+    # ...and they are genuinely different sides, not both collapsed onto one.
+    assert not math.isclose(cp_liquid, cp_vapor, rel_tol=0.05)
+
+
 # --- construction / mode selection ----------------------------------------
 
 
