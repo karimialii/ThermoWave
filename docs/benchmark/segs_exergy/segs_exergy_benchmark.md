@@ -216,9 +216,9 @@ TOTAL        36061.70       36082.47    -0.06%
 ```
 
 (`hpt1`'s delta moved from -0.11% to -0.13% once the loop actually closed:
-`boiler.in`'s pressure is now whatever the feedwater train's own chain of
+`eco.cold_in`'s pressure is now whatever the feedwater train's own chain of
 `PR`s actually produces, ~99.98 bar, rather than an externally asserted
-value — see "Why `SimpleEvaporator`, not a fixed `PR`" above. Every other
+value — see "Why `PR_cold=1.0`, not a fixed target `PR`" above. Every other
 stage is unaffected, and the total shifts by 0.01 points — a real, honest,
 sub-0.1%-level consequence of closing the loop, not a regression.)
 
@@ -411,28 +411,56 @@ minus condensate/feed pump work):
 
 ![Per-component exergy destruction and exergetic efficiency](exergy_efficiency.png)
 
+Actual printed output from `python segs_exergy_benchmark.py`:
+
 ```
-component         E_F [W]      E_P [W]      E_D [W]   epsilon [%]
-hpt1              8.494e6      7.635e6      8.597e5      89.9
-hpt2              3.867e6      3.476e6      3.906e5      89.9
-lpt1              6.230e6      5.731e6      4.990e5      92.0
-lpt2              7.108e6      6.692e6      4.154e5      94.2
-lpt3              5.324e6      5.044e6      2.804e5      94.7
-lpt4              5.043e6      4.506e6      5.369e5      89.4
-lpt5              4.537e6      2.979e6      1.557e6      65.7
-condensatePump    3.887e4      2.828e4      1.059e4      72.8
-feedPump          5.768e5      4.647e5      1.121e5      80.6
------------------------------------------------------------------
-Network           9.281e7      3.545e7      4.662e6      38.2%
+Components
+component          │       E_F [W]│       E_P [W]│       E_D [W]│   epsilon [-]
+───────────────────┼──────────────┼──────────────┼──────────────┼──────────────
+eco                │     6.386e+06│     5.878e+06│      5.08e+05│         92.05
+eva                │     2.762e+07│     2.604e+07│     1.581e+06│         94.28
+sup                │     5.856e+06│     5.473e+06│     3.834e+05│         93.45
+hpt1               │     8.493e+06│     7.634e+06│     8.595e+05│         89.88
+hpt2               │     3.867e+06│     3.476e+06│     3.907e+05│          89.9
+reheater           │     7.937e+06│     6.726e+06│      1.21e+06│         84.75
+lpt1               │      6.23e+06│     5.731e+06│      4.99e+05│         91.99
+lpt2               │     7.108e+06│     6.692e+06│     4.154e+05│         94.16
+lpt3               │     5.324e+06│     5.044e+06│     2.804e+05│         94.73
+lpt4               │     5.043e+06│     4.506e+06│     5.369e+05│         89.35
+lpt5               │     4.537e+06│     2.979e+06│     1.557e+06│         65.67
+condensatePump     │     3.887e+04│     2.828e+04│     1.059e+04│         72.76
+cwp                │     6.012e+04│     4.264e+04│     1.748e+04│         70.93
+ct                 │     2.261e+06│          8413│     2.253e+06│         0.372
+fan                │     8.282e+05│     4.958e+05│     3.324e+05│         59.86
+lpPreheater1_cold  │     2.964e+05│     1.856e+05│     1.108e+05│         62.62
+lpPreheater2_cold  │     7.865e+05│     5.709e+05│     2.155e+05│         72.59
+lpPreheater3_cold  │      1.09e+06│     8.961e+05│     1.938e+05│         82.22
+feedPump           │     5.768e+05│     4.647e+05│     1.121e+05│         80.56
+hpPreheater1_cold  │     2.191e+06│     2.002e+06│      1.89e+05│         91.37
+hpPreheater2_cold  │     2.341e+06│     2.188e+06│     1.524e+05│         93.49
+
+Network
+       E_F [W]│       E_P [W]│       E_D [W]│       E_L [W]│   epsilon [%]
+     5.108e+07│     3.545e+07│     1.181e+07│             0│          69.4
 ```
 
-`lpt5`'s low 65.7% exergetic efficiency tracks directly from Table 3's own
-low `etas0 = 0.6445` for that stage — the paper's own EASY model
+`lpt5`'s low 65.67% exergetic efficiency still tracks directly from Table
+3's own low `etas0 = 0.6445` for that stage — the paper's own EASY model
 deliberately gave the last LP stage a lower design efficiency (see p. 6:
 *"due to the necessary adaptation of the LP turbine stage
-efficiency..."*), and the exergy analysis correctly flags exactly that
-stage as the cycle's biggest single irreversibility, both in raw exergy
-destroyed (1557 kW, the largest of any component) and in efficiency.
+efficiency..."*), and among the turbine train it remains both the lowest
+efficiency and the largest raw exergy destruction (1557 kW) of any stage.
+
+Now that the boiler internals and cooling-water loop are folded into the
+same report, two other components technically read lower: `ct` (0.37%
+efficiency, 2253 kW destroyed) and `fan` (59.9%). Neither displaces
+`lpt5` as the meaningful story here — `ct`'s near-zero efficiency and
+larger destruction are an artifact of how `E_P` is defined for its open,
+ambient-venting air stream, not a genuine irreversibility comparable to
+the turbines (see "Cooling tower" above), and `fan`'s duty is two orders
+of magnitude smaller than `lpt5`'s. `lpt5` is still the largest
+*design-attributable* loss in the network — the direct, traceable
+consequence of Table 3's own deliberately-lowered `etas0` for that stage.
 
 ## PASS/FAIL
 
