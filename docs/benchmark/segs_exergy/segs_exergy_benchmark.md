@@ -111,17 +111,21 @@ target against the air-side outlet temperature, because that outlet
 temperature is nearly invariant to `UA` in this topology (set almost
 entirely by the air mass-flow sizing instead), which produces a
 near-singular Jacobian if a `Setpoint` tries to close on it (confirmed by
-SVD analysis: smallest singular value ~0 to double precision). This
-matches TESPy's own `SEGS.py` cooling-tower treatment: a plain
-liquid-water/dry-air two-stream exchanger, no humidity or evaporative
-mass transfer modeled on either side.
+SVD analysis: smallest singular value ~0 to double precision). `ct`
+itself is a plain liquid-water/dry-air two-stream exchanger — no
+humidity or evaporative mass transfer modeled on either side, a
+deliberate simplification (this package has no psychrometric/humid-air
+fluid model yet), not an assumption that the real cooling tower behaves
+this way.
 
 Several of this subsystem's sizing constants are disclosed placeholders,
 not solved or published values: `RISER_RATIO=4.0` (a standard
 natural-circulation recirculation ratio, 3–6:1 is typical), `CW_MDOT`/
 `AIR_MDOT` (sized from a placeholder condenser duty and design
-temperature-rise assumptions, not a solved value), and `FAN_PR` (matched
-to TESPy's own `SEGS.py` fan boost). `OIL_MDOT` looks like one too but
+temperature-rise assumptions, not a solved value), and `FAN_PR` (a small,
+disclosed placeholder fan boost, ~0.5 mbar above ambient — enough to move
+air through the tower, not a derived design value). `OIL_MDOT` looks like
+one too but
 isn't — it's only a warm-start *guess*; the real oil circulation rate is
 a free unknown, solved for by the evaporator's own 5 K pinch `Setpoint`
 (`oil_src` itself has `mdot=None`), landing at ~404 kg/s. See
@@ -204,15 +208,15 @@ node-level comparison with no free parameters left to tune:
 
 ```
 stage    ThermoWave [kW]   paper [kW]   diff
-hpt1          7633.38        7643.54    -0.13%
-hpt2          3476.22        3480.36    -0.12%
+hpt1          7633.76        7643.54    -0.13%
+hpt2          3476.31        3480.36    -0.12%
 lpt1          5730.57        5730.18    +0.01%
 lpt2          6692.24        6697.61    -0.08%
 lpt3          5044.07        5045.83    -0.03%
 lpt4          4505.79        4505.28    +0.01%
 lpt5          2979.43        2979.68    -0.01%
 -----------------------------------------------
-TOTAL        36061.70       36082.47    -0.06%
+TOTAL        36062.16       36082.47    -0.06%
 ```
 
 (`hpt1`'s delta moved from -0.11% to -0.13% once the loop actually closed:
@@ -273,10 +277,11 @@ deaerator's own known saturation state) lands closest.
 
 Lippke's own Table 3 doesn't cover economizer/evaporator/superheater/
 reheater design values at all — Fig. 4 only gives the boiler/reheater's
-*endpoints*, not their internal split. So this is a **TESPy cross-check,
-not a Lippke one**: the comparison target is TESPy's own published
-`SEGS_exergy-main/README.md` (`docs/benchmark/Tespy Benchmark/
-SEGS_exergy-main/README.md`), which models this same subsystem in detail.
+*endpoints* (100 bar/371 C in, 17.1 bar/371 C out for the reheater), not
+their internal split into three separate heat-transfer stages. So there's
+no published number to check `eco`'s, `eva`'s, or `sup`'s individual duty
+against — the one check the paper *does* let us make is that `sup` and
+`reheater` genuinely reach the published 371 C outlet, which they do:
 
 Actual printed output from `python segs_exergy_benchmark.py`:
 
@@ -294,44 +299,48 @@ reheater duty: 15.818 MW
 
 `sup`'s and `reheater`'s `T_cold_out` land exactly on the 371 C Fig. 4
 target (both closed by a `Setpoint` against that value, see "The cycle"
-above) — a tight-convergence check, not a boundary-hit artifact.
-`eco`/`eva`'s targets are TESPy-derived pinch/approach assumptions
-(ttd_l=5 K, 10 K approach), not published Lippke values, so there's no
-external number to check those two against directly.
+above) — a genuine, published-value check, not a boundary-hit artifact.
+The combined boiler duty (76.989 MW) plus reheater duty (15.818 MW) is
+what the "steam-cycle gross mechanical efficiency" figure below is
+computed against, so it does feed into a real downstream comparison even
+though the split across `eco`/`eva`/`sup` individually has no published
+target of its own. `eco`/`eva`'s own `UA`-closing targets (a 10 K
+economizer approach, a 5 K evaporator pinch) are disclosed engineering
+assumptions, not Lippke values — there is no external number to check
+those two components against beyond the fact that the whole chain
+reproduces the published boiler-outlet state at the far end.
 
 Each component's own **exergy** figures (`E_F`/`E_P`/`ε`, costed natively
 from the real oil stream now that it's a genuine two-stream
 `HeatExchanger` — see "EXERGY FUEL DEFINITION" in the script's module
-docstring) line up closely with TESPy's own per-component table:
+docstring) have no published equivalent either — the 1995 paper predates
+exergy analysis of this plant entirely (see "ThermoWave's own exergy
+analysis" below) — but they're reported here as ThermoWave's own results,
+not withheld for lack of a comparison:
 
 ```
-component    ThermoWave E_F/E_P/eps [MW/MW/%]   TESPy E_F/E_P/eps [MW/MW/%]
-eco                    6.39 / 5.88 / 92.1                7.52 / 6.99 / 93.0
-eva                   27.62 / 26.04 / 94.3               26.55 / 25.08 / 94.5
-sup                    5.86 / 5.47 / 93.5                6.05 / 5.53 / 91.4
-reheater               7.94 / 6.73 / 84.8                8.11 / 6.88 / 84.9
+component   E_F [MW]   E_P [MW]   E_D [MW]   eps [%]
+eco             6.39       5.88       0.51     92.1
+eva            27.62      26.04       1.58     94.3
+sup             5.86       5.47       0.38     93.5
+reheater        7.94       6.73       1.21     84.8
 ```
 
-Close but not identical — expected, since ThermoWave's boiler internals
-use disclosed placeholder sizing (`RISER_RATIO`, the economizer/evaporator
-approach temperatures) rather than TESPy's own independently-chosen
-design point, and the two models' oil circulation rates are each their
-own free unknown, not forced to match. The efficiencies (`ε`) track TESPy's
-own within a couple of points across all four components, and `eva`'s duty
-(53.2 MW here vs. TESPy's own comparable ballpark) dominates the boiler's
-total heat input in both models, as expected for the phase-change stage.
+`eva`'s duty (53.2 MW) and exergy fuel (27.6 MW) dominate the boiler's
+total heat input, as expected for the phase-change stage.
 
 ### Cooling tower
 
 Same disclosure as above: Lippke's Table 3 has no cooling-tower design
-data, so this is a TESPy cross-check against `SEGS_exergy-main/README.md`,
-not a Lippke one.
+data at all, so there's no published figure to check `condenser`'s or
+`ct`'s duty against directly — the check available here is internal
+consistency across the closed cooling-water loop itself.
 
 Actual printed output:
 
 ```
-condenser  Q= 58.303 MW   pinch=1.98 K   (TESPy: E_F=3.07 MW, E_P=1.56 MW)
-ct         Q= 58.363 MW   T_hot_out=  34.5 C   T_cold_out=  30.1 C   (TESPy: E_F=2.07 MW, E_P=0.49 MW)
+condenser  Q= 58.303 MW   pinch=1.98 K
+ct         Q= 58.363 MW   T_hot_out=  34.5 C   T_cold_out=  30.1 C
 ```
 
 `condenser`'s duty (58.3 MW) and `ct`'s duty (58.4 MW) agree with each
@@ -341,16 +350,7 @@ small pump work added in between. `condenser`'s pinch (1.98 K) sits just
 under the 2 K target `_design_ct_UA()` was sized against — `ct`'s `UA` is a
 fixed, precomputed value (not a free `Setpoint`, see "The cycle" above),
 so a small pinch shortfall like this is an expected consequence of sizing
-UA once rather than solving it to hit the target exactly. TESPy's own
-published `E_F`/`E_P` figures for its Condenser (3.07/1.56 MW) and Cooling
-tower (2.07/0.49 MW) are shown alongside for reference, not a strict
-apples-to-apples check: `ct`'s own per-component exergy costing here
-(`ε` ≈ 0.4% in the printed exergy report) isn't directly comparable to
-TESPy's 23.6% — the two models define `E_P` for an open, ambient-venting
-air stream differently (see `PR_COLD_CT`'s own comment in the module
-docstring for why ThermoWave costs the air side the way it does), so the
-duty/pinch figures above, not the exergy efficiency, are this section's
-real cross-check.
+UA once rather than solving it to hit the target exactly.
 
 ### Pump parasitics
 
@@ -376,8 +376,8 @@ needed to deliver that shaft work through a real motor.
 
 ```
                                         ThermoWave      paper
-gross mechanical power                  36061.7 kW   36067 kW  (Fig. 4)
-gross electrical power (x0.97 gen.)     34979.8 kW   34985 kWe (Fig. 4)
+gross mechanical power                  36062.2 kW   36067 kW  (Fig. 4)
+gross electrical power (x0.97 gen.)     34980.3 kW   34985 kWe (Fig. 4)
 ```
 
 **Exact match** on the gross figures (Fig. 4's own kW→kWe 97% generator
@@ -522,18 +522,15 @@ reheater) and cooling-water-loop/cooling-tower subsystems both converge
 cleanly as part of the same full-plant solve (44 iterations, residual
 8.9e-08) — there's no separate pass/fail gate for them, since they're
 wired into the one `Network.solve()` this whole benchmark already runs.
-Since Lippke's Table 3 has no design data for either subsystem, they're
-checked against TESPy's own published `SEGS_exergy-main/README.md`
-numbers instead (see "Boiler internals" and "Cooling tower" above): the
-four boiler-internals components' own exergy efficiencies land within a
-couple of points of TESPy's own (92.1/94.3/93.5/84.8% here vs.
-93.0/94.5/91.4/84.9% there), and the condenser/cooling-tower duties agree
-with each other to within 0.1% across the closed cooling-water loop. This
-is a looser cross-check than the Table 3 turbine/mass-balance comparisons
-above — TESPy and this benchmark are two independently-parameterized
-models of the same subsystem, not the same published numbers reproduced
-exactly — but it's the strongest check available for a subsystem Lippke's
-own paper never published design data for.
+Lippke's Table 3 has no design data for either subsystem, so their own
+pass criteria are narrower than the turbine/mass-balance checks above:
+`sup` and `reheater` genuinely reach the published 371 C boiler/reheater
+outlet (see "Boiler internals"), and the closed cooling-water loop is
+internally consistent (`condenser`'s and `ct`'s duties agree to within
+0.1%, see "Cooling tower"). Everything else about these two subsystems —
+individual component duties, `UA`s, and exergy figures — is reported as
+ThermoWave's own result with no published number to check it against,
+disclosed as such rather than presented as a validated match.
 
 ## Regenerating the plots
 
