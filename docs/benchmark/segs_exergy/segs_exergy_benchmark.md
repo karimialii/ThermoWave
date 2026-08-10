@@ -132,6 +132,38 @@ a free unknown, solved for by the evaporator's own 5 K pinch `Setpoint`
 `docs/superpowers/specs/2026-08-06-segs-full-plant-design.md` for the
 full degrees-of-freedom rationale behind each of these.
 
+**Feedwater heaters: a real `FeedwaterHeater` component per heater, not a
+`SimpleCondenser`+`SimpleEvaporator` pair with a disclosed gap between
+them.** An earlier version of each of the 5 regenerative feedwater
+heaters was two components — a `SimpleCondenser` on the extraction-steam
+side and a `SimpleEvaporator` (duty mode) on the feedwater side, with a
+precomputed, fixed target-temperature-difference (TTD) duty and no
+shared residual tying the two sides together at all. Their duties only
+approximately agreed, with a disclosed 0.2%–7.5% gap across the 5
+heaters. Each heater is now a single
+[`FeedwaterHeater`](../../components/heat-exchangers/feedwater-heaters.md)
+— structurally `Condenser` renamed and generalized (a closed FWH
+genuinely *is* a condenser whose "coolant" happens to be feedwater) —
+with `hot_in`/`hot_out`/`cold_in`/`cold_out` ports: the cold side's
+outlet enthalpy is now `h_cold_in + Q/mdot_cold`, using the *same* `Q`
+the hot side's own condensing duty just solved. There's only one duty
+now, so there's nothing left for the two sides to disagree about.
+
+**The open feedwater heater (`FWT`, the deaerator): a real equilibrium
+constraint, not a bare `Junction`.** `Junction` mixes its inlets
+(mass-weighted average enthalpy) but enforces no equilibrium at all — an
+earlier version of this benchmark used a plain 3-inlet `Junction` for
+`FWT`, which only produced a physically correct saturated-liquid outlet
+because the upstream extraction split happened to already be sized
+right; nothing in the solve actually required it.
+[`Deaerator`](../../components/heat-exchangers/feedwater-heaters.md#deaerator-open)
+is `Junction`'s same N-inlet mixing, plus the one residual `Junction` lacks:
+it pins the outlet directly to `h_f(P)` (saturated liquid at the shared
+outlet pressure) — the same equilibrium-pin pattern `Drum` already uses
+for its own `steam_out`/`water_out`, minus `Drum`'s differential-storage
+machinery, since this is a purely algebraic mixing+equilibrium point, not
+a dynamic vessel.
+
 **Every extraction/split fraction is fixed, not solved for.** Table 3's
 own turbine `mFeed0` sequence hands over the exact design-point extraction
 at each tap directly — e.g. `hpt1`'s `38.6415 -> 35.7326 kg/s` *is* the
@@ -142,13 +174,14 @@ and needed a `Junction` free parameter closed by a `Controller`. Here
 there's no free-parameter machinery at all — every split is a plain
 Python float computed once from Table 3.
 
-## Why the feedwater heaters aren't `MultiPassHeatExchanger`
+## Why the feedwater heaters aren't `MultiPassHeatExchanger`, and are now `FeedwaterHeater`
 
 Tried first, and it reliably crashed: every extraction feeding a
 regenerative feedwater heater here is **condensing steam**, and several of
 this plant's own low-pressure turbine exhausts land ON or inside the
-two-phase dome. `SimpleCondenser`'s own docstring says exactly why that
-breaks an effectiveness-NTU model: *"cp is effectively infinite during a
+two-phase dome. `FeedwaterHeater`'s own docstring says exactly why that
+breaks an effectiveness-NTU model (the same reason `Condenser` isn't
+built on `HeatExchanger` either): *"cp is effectively infinite during a
 constant-pressure phase change, so an effectiveness-NTU (C = mdot\*cp)
 framework can't represent condensation."* `MultiPassHeatExchanger` hit
 that head-on — `CoolProp cp() ... Saturation pressure [28680 Pa]
@@ -156,26 +189,26 @@ corresponding to T [341.215 K] is within 1e-4% of given p`, at exactly
 `lpt4`'s exhaust state (0.2868 bar), which genuinely is right at
 saturation at this design point.
 
-So each feedwater heater here is a **boundary-crossing pair**, one
-component per side, matching how a real feedwater heater's two jobs
-actually are different physics:
+Each heater here is now a single `FeedwaterHeater` — structurally
+`Condenser` renamed and generalized, matching how a real feedwater
+heater's two jobs actually are different physics but tying them together
+with one shared calculation instead of two independent ones:
 
-- **hot side**: `SimpleCondenser(outlet_quality=0)` — the extraction steam
-  condenses fully to saturated liquid at its own *solved* mdot/h_in. Its
-  duty is a genuine result of the solve, not assumed.
-- **cold side**: `SimpleEvaporator(duty=<precomputed constant>)` (despite
-  the name — duty mode just adds a fixed Q to a single stream; the
-  feedwater here stays subcooled liquid throughout, never actually
-  evaporating). Its duty is precomputed *once*, outside the solve, from
-  Table 3's own design cold-side mass flow and a standard feedwater-heater
-  terminal-temperature-difference assumption (TTD = 5 K below the
-  extraction's saturation temperature) — using only safe, single-phase
-  liquid `enthalpy_pt` calls, never a `cp()` call anywhere near the dome.
+- **hot side** (condensing extraction steam): condenses fully to
+  saturated liquid at its own *solved* mdot/h_in — duty `Q` comes from
+  this side's own energy release, a genuine solved result.
+- **cold side** (single-phase feedwater): its outlet enthalpy is
+  `h_cold_in + Q/mdot_cold` — the *same* `Q` the hot side just solved,
+  not an independently precomputed number.
 
-The two sides' duties are consequently **not** forced to match (no shared
-UA ties them) — the script reports both, and the gap, explicitly (see
-Results). This is a real, disclosed modeling simplification, not hidden
-in the numbers.
+An earlier version of this benchmark modeled each heater as a
+`SimpleCondenser`(hot) + `SimpleEvaporator`(cold, `duty=<a
+TTD-based precomputed constant>`) **pair**, with no shared residual tying
+the two sides together at all — their duties only approximately agreed,
+with a disclosed 0.2%–7.5% gap across the 5 heaters (see this file's own
+git history for that comparison). `FeedwaterHeater` removes that gap
+structurally: there is only one `Q` now, so there is nothing left to not
+agree.
 
 ## Getting the initial guess to converge at all
 
@@ -238,7 +271,7 @@ clearly does.
 
 Now a **solver-enforced identity**, not a post-hoc comparison: since the
 loop is genuinely closed by a single `Recycle`, `recycle.in` *is*
-`hpPreheater2_cold.out` — the same canonical node, not two independently
+`hpPreheater2.cold_out` — the same canonical node, not two independently
 computed numbers that happen to agree:
 
 ```
@@ -255,23 +288,25 @@ tautology (nothing forces this to close; it closes because the topology
 is right). The script asserts both equalities directly rather than just
 printing them.
 
-### Feedwater heater energy balance (hot side solved vs. cold side fixed-duty)
+### Feedwater heater duty (single genuine `Q`, both sides solved together)
 
 ```
-heater          Q_hot [kW]   Q_cold [kW]   gap
-hpPreheater1       5757.0       5747.7    +0.2%
-hpPreheater2       5161.6       5583.1    -7.5%
-lpPreheater1       2181.4       2348.5    -7.1%
-lpPreheater2       3815.9       3974.9    -4.0%
-lpPreheater3       3970.4       4175.5    -4.9%
+heater            Q [kW]   TTD (pinch) [K]
+hpPreheater1      5757.2       0.80
+hpPreheater2      5161.7       2.87
+lpPreheater1      2181.4       8.80
+lpPreheater2      3815.9       9.55
+lpPreheater3      3970.4      10.58
 ```
 
-`Q_hot` is a genuine solved result (extraction steam's own condensing
-duty, at its actual solved mdot/enthalpy); `Q_cold` is the precomputed
-TTD-based assumption described above. A few-percent gap is the expected
-cost of that simplification (no shared UA ties the two sides here) —
-`hpPreheater1` (fed by a mixed/merged drain stream, closest to the
-deaerator's own known saturation state) lands closest.
+There is no hot/cold gap to report any more — `FeedwaterHeater` computes
+one `Q` from the condensing extraction steam's own solved energy release,
+and the feedwater side's outlet is derived directly from that same `Q`,
+not an independently precomputed number. TTD (terminal temperature
+difference, `T_sat_hot - T_cold_out`) is reported as a diagnostic, not a
+solved constraint — it falls out of wherever the shared `Q` and each
+heater's own fixed cold-side mass flow land, the same real design
+metric a plant engineer would read off this table.
 
 ### Boiler internals (economizer/evaporator/superheater/reheater)
 
@@ -286,16 +321,25 @@ against — the one check the paper *does* let us make is that `sup` and
 Actual printed output from `python segs_exergy_benchmark.py`:
 
 ```
-eco       UA=4.5286e+05 W/K  Q= 13.094 MW  T_hot:  316.0 ->  300.0 C   T_cold:  234.0 ->  301.0 C
+eco       UA=4.4489e+05 W/K  Q= 12.791 MW  T_hot:  316.0 ->  300.4 C   T_cold:  235.6 ->  301.0 C
 eva       UA=5.8109e+06 W/K  Q= 53.194 MW  T_hot:  378.0 ->  316.0 C   T_cold:  311.0 ->  311.0 C
 sup       UA=2.0363e+05 W/K  Q= 10.701 MW  T_hot:  390.0 ->  378.0 C   T_cold:  311.0 ->  371.0 C
 reheater  UA=3.7102e+05 W/K  Q= 15.818 MW  T_hot:  390.0 ->  261.7 C   T_cold:  208.7 ->  371.0 C
 drum      P=99.978 bar  T_sat=311.0 C  level=0.500
 oil mdot  404.06 kg/s (free unknown, sized by eva's ttd_l=5 pinch; warm-start guess was 382.07)
 
-boiler duty:   76.989 MW
+boiler duty:   76.686 MW
 reheater duty: 15.818 MW
 ```
+
+(`eco`'s duty/inlet temperature shifted slightly from an earlier version
+of this table — 12.791 vs. 13.094 MW, 235.6 vs. 234.0 C — a real,
+expected consequence of the feedwater heaters becoming genuine
+`FeedwaterHeater`s: `eco`'s own cold-side inlet is the feedwater train's
+own solved outlet, which moved slightly once the feedwater heaters'
+duties stopped being independently fixed. `eva`/`sup`/`reheater` are
+unaffected, since they sit downstream of `eco` inside the boiler
+internals, not the feedwater train.)
 
 `sup`'s and `reheater`'s `T_cold_out` land exactly on the 371 C Fig. 4
 target (both closed by a `Setpoint` against that value, see "The cycle"
@@ -320,7 +364,7 @@ not withheld for lack of a comparison:
 
 ```
 component   E_F [MW]   E_P [MW]   E_D [MW]   eps [%]
-eco             6.39       5.88       0.51     92.1
+eco             6.24       5.75       0.49     92.2
 eva            27.62      26.04       1.58     94.3
 sup             5.86       5.47       0.38     93.5
 reheater        7.94       6.73       1.21     84.8
@@ -357,9 +401,16 @@ UA once rather than solving it to hit the target exactly.
 ```
                           ThermoWave    Table 2 published
 condensatePump               38.9 kW         190 kW
-feedPump                    576.8 kW         880 kW
-combined                    615.7 kW        1070 kW
+feedPump                    579.5 kW         880 kW
+combined                    618.4 kW        1070 kW
 ```
+
+(`feedPump`'s own power moved slightly, 579.5 vs. an earlier 576.8 kW —
+the same real, expected consequence of the feedwater heaters' duties no
+longer being independently fixed: `feedPump`'s own inlet state comes
+from the deaerator/feedwater-heater chain immediately upstream, which
+shifted slightly once those heaters' duties became genuinely solved
+rather than TTD-assumed.)
 
 Lower than published, mainly because `Pump`'s discharge pressures here
 (9.0 bar / 104.1 bar) are this benchmark's own reasonable placeholders,
@@ -386,7 +437,7 @@ train alone reproduces the paper's own heat balance almost exactly.
 
 ```
 steam-cycle gross mechanical efficiency
-  (turbine power / (boiler + reheat duty)):  38.9%
+  (turbine power / (boiler + reheat duty)):  39.0%
 ```
 
 The paper's own headline **38.2% gross electric efficiency** and **31.4
@@ -405,7 +456,7 @@ subtracted from the printed net-power figure, for the same reason the
 condensate/feed pumps aren't compared head-to-head with Table 2 either —
 Table 2's parasitics are *electrical* figures that include a motor
 efficiency `Pump`/`SimpleCompressor` don't model, so the shaft power
-computed here isn't the same quantity. This benchmark's 38.9%
+computed here isn't the same quantity. This benchmark's 39.0%
 steam-cycle figure and the paper's 38.2% gross-electric figure are
 answering two different, if related, questions — both given here rather
 than picking one and calling it the same number.
@@ -424,54 +475,61 @@ Actual printed output from `python segs_exergy_benchmark.py`:
 
 ```
 Components
-component          │       E_F [W]│       E_P [W]│       E_D [W]│   epsilon [-]
-───────────────────┼──────────────┼──────────────┼──────────────┼──────────────
-eco                │     6.386e+06│     5.878e+06│      5.08e+05│         92.05
-eva                │     2.762e+07│     2.604e+07│     1.581e+06│         94.28
-sup                │     5.856e+06│     5.473e+06│     3.834e+05│         93.45
-hpt1               │     8.493e+06│     7.634e+06│     8.595e+05│         89.88
-hpt2               │     3.867e+06│     3.476e+06│     3.907e+05│          89.9
-reheater           │     7.937e+06│     6.726e+06│      1.21e+06│         84.75
-lpt1               │      6.23e+06│     5.731e+06│      4.99e+05│         91.99
-lpt2               │     7.108e+06│     6.692e+06│     4.154e+05│         94.16
-lpt3               │     5.324e+06│     5.044e+06│     2.804e+05│         94.73
-lpt4               │     5.043e+06│     4.506e+06│     5.369e+05│         89.35
-lpt5               │     4.537e+06│     2.979e+06│     1.557e+06│         65.67
-condenser          │     3.059e+06│     2.219e+06│     8.403e+05│         72.53
-condensatePump     │     3.887e+04│     2.828e+04│     1.059e+04│         72.76
-cwp                │     6.012e+04│     4.264e+04│     1.748e+04│         70.93
-ct                 │     2.261e+06│          8413│     2.253e+06│         0.372
-fan                │     8.282e+05│     4.958e+05│     3.324e+05│         59.86
-lpPreheater1_cold  │     2.964e+05│     1.856e+05│     1.108e+05│         62.62
-lpPreheater2_cold  │     7.865e+05│     5.709e+05│     2.155e+05│         72.59
-lpPreheater3_cold  │      1.09e+06│     8.961e+05│     1.938e+05│         82.22
-feedPump           │     5.768e+05│     4.647e+05│     1.121e+05│         80.56
-hpPreheater1_cold  │     2.191e+06│     2.002e+06│      1.89e+05│         91.37
-hpPreheater2_cold  │     2.341e+06│     2.188e+06│     1.524e+05│         93.49
+component       │       E_F [W]│       E_P [W]│       E_D [W]│   epsilon [-]
+────────────────┼──────────────┼──────────────┼──────────────┼──────────────
+eco             │     6.241e+06│     5.753e+06│     4.877e+05│         92.19
+eva             │     2.762e+07│     2.604e+07│     1.581e+06│         94.28
+sup             │     5.856e+06│     5.473e+06│     3.834e+05│         93.45
+hpt1            │     8.493e+06│     7.634e+06│     8.595e+05│         89.88
+hpt2            │     3.867e+06│     3.476e+06│     3.907e+05│          89.9
+reheater        │     7.937e+06│     6.726e+06│      1.21e+06│         84.75
+lpt1            │      6.23e+06│     5.731e+06│      4.99e+05│         91.99
+lpt2            │     7.108e+06│     6.692e+06│     4.154e+05│         94.16
+lpt3            │     5.324e+06│     5.044e+06│     2.804e+05│         94.73
+lpt4            │     5.043e+06│     4.506e+06│     5.369e+05│         89.35
+lpt5            │     4.537e+06│     2.979e+06│     1.557e+06│         65.67
+condenser       │     3.059e+06│     2.219e+06│     8.403e+05│         72.53
+condensatePump  │     3.887e+04│     2.828e+04│     1.059e+04│         72.76
+cwp             │     6.012e+04│     4.264e+04│     1.748e+04│         70.93
+ct              │     2.261e+06│          8413│     2.253e+06│         0.372
+fan             │     8.282e+05│     4.958e+05│     3.324e+05│         59.86
+lpPreheater1    │     2.753e+05│     1.684e+05│     1.069e+05│         61.17
+lpPreheater2    │      7.55e+05│     5.302e+05│     2.248e+05│         70.22
+lpPreheater3    │     1.041e+06│     8.249e+05│     2.156e+05│         79.28
+feedPump        │     5.795e+05│      4.68e+05│     1.116e+05│         80.74
+hpPreheater1    │     2.195e+06│      2.04e+06│     1.552e+05│         92.93
+hpPreheater2    │     2.164e+06│     2.041e+06│     1.228e+05│         94.33
 
 Network
        E_F [W]│       E_P [W]│       E_D [W]│       E_L [W]│   epsilon [%]
-     5.108e+07│     3.545e+07│     1.265e+07│             0│          69.4
+     5.091e+07│     3.544e+07│     1.259e+07│             0│          69.6
 ```
+
+Every feedwater heater now gets a genuine `E_F`/`E_P`/`E_D`/`ε` row costed
+directly from its own two real streams (`lpPreheater1`/`2`/`3`,
+`hpPreheater1`/`2`) — an earlier version of this table only had a
+`_cold`-suffixed row for each (via the `source_temperatures`
+approximation, since the old `SimpleEvaporator` cold side had no "other
+stream" to cost against natively). `FeedwaterHeater` fixed that the same
+way the earlier `Condenser`/exergy-costing fix did for the main
+condenser: both sides are real now, so both sides get costed.
 
 **The network-level balance does not close, and that's disclosed here
 rather than left for a reader to discover.** A closed exergy balance would
-have `E_P + E_D + E_L = E_F`; this run gives 35.45 + 12.65 + 0 = 48.10 MW
-against `E_F` = 51.08 MW, a **2.99 MW (5.8%) gap**. Two known, separate
+have `E_P + E_D + E_L = E_F`; this run gives 35.44 + 12.59 + 0 = 48.03 MW
+against `E_F` = 50.91 MW, a **2.88 MW (5.7%) gap**. Two known, separate
 causes account for it, neither of which is a solver or a component error:
 
 1. **The network-level `fuel` is a Carnot approximation; the component
    rows are native.** The `fuel=[...]` passed to `exergy_report()` costs
    the boiler and reheat heat input as `Q * (1 - T0/T_HTF)` at a single
-   HTF supply temperature — kept for continuity with how the FWH cold
-   sides are costed via `source_temperatures`. The `eco`/`eva`/`sup`/
-   `reheater` rows in the component table are *not* computed that way any
-   more: they're genuine two-stream `HeatExchanger`s now, so
-   `exergy_report()` costs them natively from the real oil stream's own
-   exergy drop. The two numbers no longer reconcile, and the
-   network-level fuel runs the higher of the two. Costing the
-   network-level fuel natively from the oil stream as well would remove
-   this term; that's a natural follow-up, not done here.
+   HTF supply temperature. The `eco`/`eva`/`sup`/`reheater` rows in the
+   component table are *not* computed that way: they're genuine
+   two-stream `HeatExchanger`s, so `exergy_report()` costs them natively
+   from the real oil stream's own exergy drop. The two numbers no longer
+   reconcile, and the network-level fuel runs the higher of the two.
+   Costing the network-level fuel natively from the oil stream as well
+   would remove this term; that's a natural follow-up, not done here.
 2. **`fan` and `cwp` shaft work enters `E_D` with no matching `E_F`
    entry.** Both are real modeled components whose destroyed exergy is
    tallied into the network `E_D` total, but the electrical work driving
@@ -510,18 +568,20 @@ consequence of Table 3's own deliberately-lowered `etas0` for that stage.
 3's published design value (total: -0.06%), the mass balance closes
 exactly through the full drain cascade (now as a solver-enforced identity,
 not a post-hoc check), and gross mechanical/electrical output matches
-Fig. 4 almost exactly (36062 vs. 36067 kW, 34980 vs. 34985 kWe). The
-feedwater heater energy-balance gaps (up to 7.5%) and the
-pump-parasitic shortfall are both disclosed, understood simplifications
-(a precomputed TTD-based cold-side duty instead of a shared-UA model; a
-placeholder pump discharge pressure instead of a derived one) — not
-unexplained discrepancies.
+Fig. 4 almost exactly (36062 vs. 36067 kW, 34980 vs. 34985 kWe). Every
+feedwater heater's own hot/cold duty now comes from one shared,
+genuinely-solved calculation (`FeedwaterHeater` — see "Feedwater heater
+duty" above), removing the earlier version's disclosed 0.2%–7.5%
+hot/cold gap entirely. The remaining pump-parasitic shortfall is a
+disclosed, understood simplification (a placeholder pump discharge
+pressure instead of a derived one) — not an unexplained discrepancy.
 
-The new boiler-internals (economizer/drum/evaporator/superheater/
-reheater) and cooling-water-loop/cooling-tower subsystems both converge
-cleanly as part of the same full-plant solve (44 iterations, residual
-8.9e-08) — there's no separate pass/fail gate for them, since they're
-wired into the one `Network.solve()` this whole benchmark already runs.
+The boiler-internals (economizer/drum/evaporator/superheater/reheater),
+cooling-water-loop/cooling-tower, and feedwater-heater/deaerator
+subsystems all converge cleanly as part of the same full-plant solve (42
+iterations, residual 2.3e-08) — there's no separate pass/fail gate for
+them, since they're wired into the one `Network.solve()` this whole
+benchmark already runs.
 Lippke's Table 3 has no design data for either subsystem, so their own
 pass criteria are narrower than the turbine/mass-balance checks above:
 `sup` and `reheater` genuinely reach the published 371 C boiler/reheater
