@@ -1,3 +1,3 @@
 """ThermoWave: a 1D implicit thermodynamic network solver."""
 
-__version__ = "0.8.2"
+__version__ = "0.9.0"

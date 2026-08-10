@@ -59,9 +59,10 @@ result.print_report()
   integrates the same equations forward in time.
 - **Composable fluid models.** Constant-property ideal gas, ideal-gas
   mixtures, real-fluid properties via [CoolProp](http://www.coolprop.org/),
-  and equilibrium combustion chemistry via [Cantera](https://cantera.org/)
-  all implement the same `BaseFluid` interface, so a component written
-  against it works with any of them.
+  equilibrium combustion chemistry via [Cantera](https://cantera.org/), and
+  psychrometric humid air (also via CoolProp) all implement the same
+  `BaseFluid` interface, so a component written against it works with any
+  of them.
 - **No hidden solve order.** Wiring mistakes (a free parameter nothing
   closes, two components fighting over the same unknown) are caught by
   `Network.check_wiring()` and a non-square-system error naming the actual

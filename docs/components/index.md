@@ -24,7 +24,7 @@ control/index
 | [Turbomachinery](turbomachinery/index.md) | `SimpleCompressor`, `Compressor`, `SimpleTurbine`, `Turbine`, `SteamTurbine`, `Pump` |
 | [Mechanical & electrical](mechanical/index.md) | `Shaft`, `ShaftLoad`, `ElectricMotor`, `Generator`, `SimpleGenerator` |
 | [Combustion](combustion/index.md) | `SimpleCombustor`, `Combustor` |
-| [Heat exchangers & phase change](heat-exchangers/index.md) | `SimpleHeatExchanger`, `HeatExchanger`, `MultiPassHeatExchanger`, `Condenser`, `SimpleCondenser`, `Evaporator`, `SimpleEvaporator`, `Drum`, `Tank` |
+| [Heat exchangers & phase change](heat-exchangers/index.md) | `SimpleHeatExchanger`, `HeatExchanger`, `MultiPassHeatExchanger`, `Condenser`, `SimpleCondenser`, `Evaporator`, `SimpleEvaporator`, `Drum`, `Tank`, `FeedwaterHeater`, `Deaerator`, `CoolingTower` |
 | [Thermal network](thermal-network/index.md) | `ThermalMass`, `Convection`, `Conduction`, `Radiation` |
 | [Control & instrumentation](control/index.md) | `Sensor`, `Controller`, `PIDController`, `Setpoint`, `Schedule` |
 

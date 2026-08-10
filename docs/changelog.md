@@ -4,6 +4,55 @@ Notable changes to ThermoWave, in reverse chronological order. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to the `[project] version` in `pyproject.toml`.
 
+## 0.9.0 — 2026-08-10
+
+### Added
+
+- **`HumidAirFluid`**, a psychrometric fluid model backed by CoolProp's
+  `HAPropsSI` — the first fluid model in ThermoWave that tracks humidity
+  ratio, relative humidity, wet-bulb temperature, and the latent/sensible
+  energy split. Humidity ratio `W` [kg water/kg dry air] is fixed at
+  construction (the same role `CanteraFluid`'s composition plays); `mdot`
+  for a `HumidAirFluid` stream means **dry-air** mass flow, the ASHRAE
+  convention, and the basis `HAPropsSI`'s own `H`/`Vha`/`cp_ha` outputs
+  already use. `from_relative_humidity(T, RH, P)` derives `W` from a more
+  common "50% RH at 20°C" specification. Drops into any existing
+  `Source(fluid=...)`/`Pipe`/`HeatExchanger`/`Junction` network with no
+  other changes required. See `thermowave.fluids.humid_air.HumidAirFluid`
+  and `thermowave.fluids.psychrometrics.supports_humid_air()`.
+- **`CoolingTower`**, evaporative cooling with real water-vapor mass
+  transfer — a water stream loses heat *and* mass, an air stream gains
+  heat *and* humidity, closed by a saturation constraint on the outlet air
+  (`target_RH_out`, default 1.0). See
+  [`CoolingTower`](components/heat-exchangers/cooling-tower.md).
+- **`FeedwaterHeater`** and **`Deaerator`**, first-class regenerative
+  feedwater heater components — replacing the pattern of hand-building each
+  one from a `SimpleCondenser` + `SimpleEvaporator` + `Junction` triple with
+  two independently-fixed (and never exactly matching) duties.
+  `FeedwaterHeater` (closed FWH) is structurally `Condenser` renamed and
+  generalized — one shared duty computed once, not two. `Deaerator` (open
+  FWH) is `Junction`'s own mixing plus the one constraint `Junction` lacks:
+  pinning the outlet to saturated liquid. See
+  [Feedwater heaters](components/heat-exchangers/feedwater-heaters.md).
+
+### Changed
+
+- **mypy noise on fluid-capability duck typing eliminated.** The
+  `two_phase.py`/`psychrometrics.py` runtime capability checks
+  (`supports_two_phase()`, `supports_entropy()`, `supports_humid_air()`, and
+  the new `supports_cantera_composition()`) are now typed as `TypeIs`
+  Protocols, removing ~40 recurring false-positive "`BaseFluid` has no
+  attribute" errors. Purely an internal type-checking improvement — no
+  runtime behavior change. Adds `typing_extensions` as a direct dependency
+  (needed for `TypeIs` on the package's Python 3.10 floor).
+
+### Fixed
+
+- **`SteamTurbine.report_metrics()`** could raise a bare `AttributeError`
+  for a fluid that supports entropy but not two-phase queries (e.g. a
+  hypothetical future ideal-gas-only fluid) — now raises the same clear
+  `require_two_phase()` error every other two-phase call site already has.
+
 ## 0.8.2 — 2026-08-05
 
 ### Added

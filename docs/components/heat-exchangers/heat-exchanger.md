@@ -11,15 +11,23 @@ to model at all.
 ## `HeatExchanger` (two-stream)
 
 Fixed effectiveness, or effectiveness derived from geometry (`UA`, flow
-arrangement) — auto-selected by which one you give. Give exactly one of
-`effectiveness` or `UA`; passing both, or neither, raises `ValueError`.
+arrangement) — auto-selected by which one you give. Give at most one of
+`effectiveness` or `UA`; passing both raises `ValueError`. Leaving both
+unset also means UA/NTU mode, with `UA` itself left as a free Newton
+unknown (seeded from `UA_guess`, default `1e5`) instead of fixed — the same
+free-parameter pattern `SimpleHeatExchanger`'s own `Q=None` uses, closed by
+a `Setpoint`/`Controller` targeting `"T_hot_out [K]"`/`"T_cold_out [K]"`
+against a design approach/pinch temperature (the standard way a real HX's
+duty gets sized to hit a specified terminal temperature difference, rather
+than a datasheet UA).
 
 **Ports:** `hot_in`, `hot_out`, `cold_in`, `cold_out` &nbsp;·&nbsp;
 **Parameters:** `PR_hot`, `PR_cold`, plus one of:
 - `effectiveness` — fixed-effectiveness mode
-- `UA`, `n_passes` (default 1), `arrangement` (`"counterflow"` /
-  `"parallel"` / `"crossflow"` / `"shell_and_tube"` / `"custom"`),
-  `correlation` (required iff `arrangement="custom"`) — UA/NTU mode
+- `UA` (or `None` to leave it free), `n_passes` (default 1), `arrangement`
+  (`"counterflow"` / `"parallel"` / `"crossflow"` / `"shell_and_tube"` /
+  `"custom"`), `correlation` (required iff `arrangement="custom"`),
+  `UA_guess` (default `1e5`, only used when `UA=None`) — UA/NTU mode
 
 ### Fixed-effectiveness mode (`effectiveness=...`)
 
@@ -88,11 +96,18 @@ converging toward the true counterflow limit.
 `"custom"` plugs in your own `correlation(NTU, Cr) -> effectiveness`
 callable for a plate-fin/finned-tube/vendor correlation.
 
-Both single-fluid and dual-fluid streams share the network's single fluid
-model (no distinct hot/cold fluid types yet — same limitation as every
-other component here). Both side's pressure drop is a simple fixed ratio
-(not a K-factor loss model); in UA/staged mode it's split evenly in log
-space across passes.
+Each side's fluid is resolved independently via `NetworkState.fluid_at()`
+on its own port, so a genuinely different fluid on each side (e.g. an oil
+HTF stream on `hot_in`/`hot_out`, the network's own working fluid on
+`cold_in`/`cold_out`) works correctly, as long as the network actually has
+two fluids to resolve — see [`Source`](../flow-elements/source.md)'s own
+`fluid=` parameter for how a second fluid gets introduced. Both sides'
+pressure drop is a simple fixed ratio (not a K-factor loss model); in
+UA/staged mode it's split evenly in log space across passes.
+`report_metrics()` exposes `T_hot_in`/`T_cold_in`/`T_hot_out`/`T_cold_out`
+`[K]` (each read through its own outlet's resolved fluid, not assumed to
+match the inlet's) alongside `power [W]`/`effectiveness [-]`/`PR_hot [-]`/
+`PR_cold [-]`.
 
 ### `MultiPassHeatExchanger`
 

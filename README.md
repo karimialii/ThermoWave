@@ -93,14 +93,23 @@ every component calls into: `enthalpy_pt(P, T)`, `temperature_ph(P, h)`,
   thermo for an arbitrary named *mixture*, backed by
   [Cantera](https://cantera.org/) — `IdealGasMixtureFluid`'s use case, but
   without the constant-cp approximation. Requires the `cantera` extra.
+- `HumidAirFluid` (`fluids/humid_air.py`) — psychrometric humid air backed
+  by CoolProp's `HAPropsSI`: humidity ratio `W` fixed at construction (the
+  same role composition plays on `CanteraFluid`), `mdot` means **dry-air**
+  mass flow (the ASHRAE convention), plus `relative_humidity_pt`/
+  `wet_bulb_pt`/`dew_point_pt` beyond the base interface (see
+  `fluids/psychrometrics.py`'s `supports_humid_air()`). Requires the
+  `coolprop` extra.
 
-A `Network` has exactly **one** fluid instance shared by every component in
-it — there's no multi-fluid mixing or composition change *within* a network
-today (a `Combustor`'s exhaust, for instance, still reports its outlet
-temperature back onto the network's one `BaseFluid`, not a genuinely
-different combustion-product mixture — see `Combustor.product_composition()`
-below for how to see that chemistry anyway, just not fed back into the
-network state).
+A `Network` has one *default* fluid, but individual nodes can carry a
+different `BaseFluid` than that default — `Combustor`/`Junction` do this by
+changing composition mid-network (see "Composition-aware fluid propagation"
+below), and `Source(fluid=...)` does it directly, seeding a genuinely
+different fluid (e.g. a secondary oil-HTF loop, or a `HumidAirFluid` air
+stream) at its own outlet with no other network changes required. Every
+component reads the fluid actually at its own node via
+`NetworkState.fluid_at()`, so this propagates correctly to everything
+downstream.
 
 ### Network graph
 
