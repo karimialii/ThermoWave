@@ -267,6 +267,51 @@ def test_condenser_is_costed_as_a_two_stream_exchanger():
     assert cost.epsilon is not None
 
 
+def test_feedwater_heater_is_costed_as_a_two_stream_exchanger():
+    # FeedwaterHeater already uses hot_in/hot_out/cold_in/cold_out (the
+    # default two-stream port names), so it needed only the isinstance
+    # registration, not a _TWO_STREAM_PORTS entry -- confirm it actually
+    # gets a real E_F/E_P/E_D row now, the same check Condenser's own test
+    # above does for the case that needed both.
+    pytest.importorskip("CoolProp")
+    from thermowave.fluids.real_fluid import CoolPropFluid
+    from thermowave.components.feedwater_heater import FeedwaterHeater
+
+    water = CoolPropFluid(name="Water")
+    hot_src = Source(name="hot_src", P=1.0e5, T=400.0, mdot=1.0)
+    cold_src = Source(name="cold_src", P=2.0e5, T=300.0, mdot=10.0)
+    fwh = FeedwaterHeater(name="fwh", outlet_quality=0.0)
+    hot_snk = Sink(name="hot_snk")
+    cold_snk = Sink(name="cold_snk")
+
+    net = Network(fluid=water)
+    for c in (hot_src, cold_src, fwh, hot_snk, cold_snk):
+        net.add_component(c)
+    net.connect(hot_src, "out", fwh, "hot_in")
+    net.connect(fwh, "hot_out", hot_snk, "in")
+    net.connect(cold_src, "out", fwh, "cold_in")
+    net.connect(fwh, "cold_out", cold_snk, "in")
+    result = net.solve(tol=1e-6, max_iter=200, progress=False)
+    assert result.converged
+
+    report = exergy_report(result, T0, P0, fuel=[0.0], product=[0.0])
+    cost = report.component_costs["fwh"]
+    assert cost is not None
+    state = result.state()
+    expected_E_F = (
+        node_exergy(state, "fwh.hot_in", T0, P0).E_PH
+        - node_exergy(state, "fwh.hot_out", T0, P0).E_PH
+    )
+    expected_E_P = (
+        node_exergy(state, "fwh.cold_out", T0, P0).E_PH
+        - node_exergy(state, "fwh.cold_in", T0, P0).E_PH
+    )
+    assert math.isclose(cost.E_F, expected_E_F, rel_tol=1e-9)
+    assert math.isclose(cost.E_P, expected_E_P, rel_tol=1e-9)
+    assert cost.E_D is not None and cost.E_D > 0.0
+    assert cost.epsilon is not None
+
+
 def test_dissipative_rejects_non_two_stream_hx_name():
     src = Source(name="src", P=101325.0, T=400.0, mdot=1.0)
     snk = Sink(name="snk")

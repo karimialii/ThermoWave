@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING
 from thermowave.components.compressor import Compressor
 from thermowave.components.condenser import Condenser
 from thermowave.components.electric_motor import ElectricMotor
+from thermowave.components.feedwater_heater import FeedwaterHeater
 from thermowave.components.generator import Generator
 from thermowave.components.heat_exchanger import HeatExchanger, MultiPassHeatExchanger
 from thermowave.components.pump import Pump
@@ -73,10 +74,10 @@ if TYPE_CHECKING:
 
 _EXPANDERS = (Turbine, SimpleTurbine, SteamTurbine)  # work OUT is the product
 _COMPRESSION = (Compressor, SimpleCompressor, Pump)  # work IN is the fuel
-_TWO_STREAM_HX = (HeatExchanger, MultiPassHeatExchanger, Condenser)  # MultiPassHeatExchanger
-# is a HeatExchanger subclass, so isinstance already covers it -- listed explicitly for
-# clarity. The single-stream SimpleHeatExchanger is NOT here: it has no two streams to
-# split into a hot/fuel and a cold/product side at all.
+_TWO_STREAM_HX = (HeatExchanger, MultiPassHeatExchanger, Condenser, FeedwaterHeater)
+# MultiPassHeatExchanger is a HeatExchanger subclass, so isinstance already covers it --
+# listed explicitly for clarity. The single-stream SimpleHeatExchanger is NOT here: it has
+# no two streams to split into a hot/fuel and a cold/product side at all.
 #
 # Condenser IS a two-stream exchanger and costs identically (fuel = the hot side's exergy
 # drop, product = the cold side's exergy rise); it just names its ports after its two
@@ -84,6 +85,12 @@ _TWO_STREAM_HX = (HeatExchanger, MultiPassHeatExchanger, Condenser)  # MultiPass
 # was previously falling through every branch here silently -- no E_F/E_P/E_D row, no
 # contribution to the network totals, no warning -- which in the SEGS benchmark quietly
 # dropped the plant's single largest heat-rejection component (58.3 MW) out of the balance.
+#
+# FeedwaterHeater already names its ports hot_in/hot_out/cold_in/cold_out -- the same
+# _DEFAULT_TWO_STREAM_PORTS every plain HeatExchanger uses -- so it needs no entry in
+# _TWO_STREAM_PORTS below, just this isinstance registration. Same failure mode as
+# Condenser's: a genuine two-stream component silently getting no exergy row at all until
+# it's added here.
 _DEFAULT_TWO_STREAM_PORTS = ("hot_in", "hot_out", "cold_in", "cold_out")
 _TWO_STREAM_PORTS: dict[type, tuple[str, str, str, str]] = {
     Condenser: ("wf_in", "wf_out", "cool_in", "cool_out"),
