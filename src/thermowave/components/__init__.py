@@ -18,9 +18,11 @@ from thermowave.components.combustor import Combustor
 from thermowave.components.compressor import Compressor
 from thermowave.components.condenser import Condenser
 from thermowave.components.controller import Controller
+from thermowave.components.deaerator import Deaerator
 from thermowave.components.drum import Drum
 from thermowave.components.electric_motor import ElectricMotor
 from thermowave.components.evaporator import Evaporator
+from thermowave.components.feedwater_heater import FeedwaterHeater
 from thermowave.components.generator import Generator
 from thermowave.components.heat_exchanger import HeatExchanger, MultiPassHeatExchanger
 from thermowave.components.heat_transfer import (
@@ -67,9 +69,11 @@ __all__ = [
     "Conduction",
     "Controller",
     "Convection",
+    "Deaerator",
     "Drum",
     "ElectricMotor",
     "Evaporator",
+    "FeedwaterHeater",
     "Generator",
     "HeatExchanger",
     "Junction",
