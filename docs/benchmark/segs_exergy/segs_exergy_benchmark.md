@@ -59,9 +59,7 @@ fluid, not an assumed endpoint. This is now modeled directly:
 components `eco`, `eva`, and `sup` (each a genuine two-stream oil/water
 exchanger, `UA` solved by a `Setpoint` against the design outlet
 temperature) plus a [`Drum`](../../components/heat-exchangers/drum.md)
-closing the natural-circulation riser loop, all fed by their own
-`Source(fluid=INCOMP::TVP1)`/`Sink` oil boundary standing in for the
-still-unmodeled solar field. The `reheater` is likewise now a real
+closing the natural-circulation riser loop. The `reheater` is likewise now a real
 two-stream `HeatExchanger` (oil hot side, steam cold side) instead of a
 single-stream `SimpleEvaporator`. A first attempt at this subsystem was
 tried and abandoned in an earlier session — correctly wired (verified
@@ -91,6 +89,44 @@ reheater doesn't have this problem — its inlet (`hpt2`'s own `P_out`,
 18.58 bar) is an independent absolute anchor, not compounded through
 other components' ratios, so `PR_cold = 17.1 / 18.58` (both
 already-published Table 3 pressures) lands on the target exactly.
+
+**The oil/HTF loop is now genuinely closed too, not a `Source`/`Sink`
+boundary — with a simplified solar-field stand-in, not the trough's own
+physics.** `oil_merge → oilPump → solarField → oil_recycle → oil_split`:
+`oilPump` is a plain `Pump` restoring the pressure lost across
+`eco`/`eva`/`sup`/`reheater`'s own `PR_hot=0.98` drops, and `solarField`
+is a plain [`SimpleHeater`](../../components/heat-exchangers/heater.md)
+targeting the published 390 C HTF supply temperature (Fig. 4) directly —
+a deliberately simplified representative for the parabolic-trough field
+(no irradiance, receiver-loss, or tracking-loss physics modeled), the
+same "boundary-crossing stand-in" pattern this benchmark already uses
+elsewhere. `oilPump`'s own shaft power is a genuine, if simplified,
+counterpart to the HTF-circulation-pump parasitic Table 2 counts against
+net output (see "Gross and net output" below for why it's still far
+below Table 2's own figure).
+
+Closing this loop with [`Recycle`](../../components/flow-elements/recycle.md)
+removed a degree of freedom the open-loop design relied on: `Recycle`
+always takes a *fixed* `mdot` (unlike TESPy's own `CycleCloser`, which
+lets the oil flow stay a genuine free unknown), so the oil circulation
+rate — previously a free Newton unknown solved for by `eva`'s own 5 K
+pinch spec — is now fixed at `OIL_MDOT_DESIGN = 404.06 kg/s` (this
+benchmark's own previously-solved open-loop value, a disclosed,
+physically-grounded design flow, not an independently invented number).
+Fixing that flow *and* hard-pinning `solarField`'s outlet at 390 C
+together would over-constrain the chain exactly the way an earlier
+abandoned attempt at the open-loop boiler already documented ("with
+`OIL_MDOT` pinned AND the oil supply temperature pinned AND
+`sp_sup`/`sp_eco` pinned, the evaporator's own oil outlet temperature is
+already fully determined — so `sp_eva`'s `ttd_l=5` had nothing left to
+move"). The fix is the same shape: `eco` no longer has a `Setpoint` of
+its own. Its `UA` stays free (`UA=None`) but is now determined by the
+closed loop's own real energy balance instead of the earlier version's
+assumed 10 K economizer-approach target — a genuine improvement, not
+just a degrees-of-freedom workaround: `eco`'s own solved state barely
+moved (12.79 MW / 300.4 C either way), confirming the closed loop's real
+physics and the earlier assumed approach temperature were already
+telling the same story.
 
 **Cooling-water loop / cooling tower: a real closed loop, not an
 unmodeled heat sink.** The condenser previously rejected its duty to
@@ -122,13 +158,13 @@ Several of this subsystem's sizing constants are disclosed placeholders,
 not solved or published values: `RISER_RATIO=4.0` (a standard
 natural-circulation recirculation ratio, 3–6:1 is typical), `CW_MDOT`/
 `AIR_MDOT` (sized from a placeholder condenser duty and design
-temperature-rise assumptions, not a solved value), and `FAN_PR` (a small,
+temperature-rise assumptions, not a solved value), `FAN_PR` (a small,
 disclosed placeholder fan boost, ~0.5 mbar above ambient — enough to move
-air through the tower, not a derived design value). `OIL_MDOT` looks like
-one too but
-isn't — it's only a warm-start *guess*; the real oil circulation rate is
-a free unknown, solved for by the evaporator's own 5 K pinch `Setpoint`
-(`oil_src` itself has `mdot=None`), landing at ~404 kg/s. See
+air through the tower, not a derived design value), and
+`OIL_MDOT_DESIGN=404.06 kg/s` (this benchmark's own previously-solved
+open-loop value, now used as a *fixed* design flow for the closed oil
+loop's own `Recycle` — see "The oil/HTF loop is now genuinely closed
+too" above for why it can no longer be a free unknown). See
 `docs/superpowers/specs/2026-08-06-segs-full-plant-design.md` for the
 full degrees-of-freedom rationale behind each of these.
 
@@ -446,20 +482,24 @@ figures, and this is disclosed rather than glossed over: those two paper
 figures are computed against a *wider* system boundary — **solar-absorbed
 power**, not boiler+reheat duty — and *net* subtracts the HTF pump and
 cooling-tower pump/fan parasitics (Table 2: 1.56 + 0.99 MWe) on top of the
-condensate/feed pumps. Of those, only the **HTF (solar-field oil)
-circulation pump** is genuinely outside this benchmark's scope — the solar
-field that pump serves isn't modeled at all (see "Scope" in the script's
-own module docstring). The cooling-water pump (`cwp`, 60 kW) and
-cooling-tower fan (`fan`, 828 kW) *are* modeled components with their own
-solved power and their own exergy rows below; they're simply not
-subtracted from the printed net-power figure, for the same reason the
-condensate/feed pumps aren't compared head-to-head with Table 2 either —
-Table 2's parasitics are *electrical* figures that include a motor
-efficiency `Pump`/`SimpleCompressor` don't model, so the shaft power
-computed here isn't the same quantity. This benchmark's 39.0%
-steam-cycle figure and the paper's 38.2% gross-electric figure are
-answering two different, if related, questions — both given here rather
-than picking one and calling it the same number.
+condensate/feed pumps. All four of those parasitics now have a modeled
+counterpart — `cwp` (60 kW), `fan` (828 kW), and, now that the oil loop
+is genuinely closed, `oilPump` (90 kW, the HTF circulation pump's own
+shaft power) — none of them subtracted from the printed net-power figure,
+for the same reason the condensate/feed pumps aren't compared
+head-to-head with Table 2 either: Table 2's parasitics are *electrical*
+figures that include a motor efficiency `Pump`/`SimpleCompressor` don't
+model, so the shaft power computed here isn't the same quantity. `oilPump`
+in particular lands far below Table 2's own 1.56 MWe HTF-pump figure (90
+vs. 1560 kW) for an additional reason beyond the missing motor efficiency:
+its own discharge pressure is this benchmark's own placeholder (restoring
+just the pressure lost across `eco`/`eva`/`sup`/`reheater`'s own `PR_hot`
+drops), not derived from the real parabolic-trough field's own pressure
+drop, which `solarField`'s simplified `SimpleHeater` stand-in doesn't
+model at all. This benchmark's 39.0% steam-cycle figure and the paper's
+38.2% gross-electric figure are answering two different, if related,
+questions — both given here rather than picking one and calling it the
+same number.
 
 ### ThermoWave's own exergy analysis (no paper equivalent)
 
@@ -477,6 +517,7 @@ Actual printed output from `python segs_exergy_benchmark.py`:
 Components
 component       │       E_F [W]│       E_P [W]│       E_D [W]│   epsilon [-]
 ────────────────┼──────────────┼──────────────┼──────────────┼──────────────
+oilPump         │     8.988e+04│      7.81e+04│     1.178e+04│         86.89
 eco             │     6.241e+06│     5.753e+06│     4.877e+05│         92.19
 eva             │     2.762e+07│     2.604e+07│     1.581e+06│         94.28
 sup             │     5.856e+06│     5.473e+06│     3.834e+05│         93.45
@@ -502,8 +543,10 @@ hpPreheater2    │     2.164e+06│     2.041e+06│     1.228e+05│         9
 
 Network
        E_F [W]│       E_P [W]│       E_D [W]│       E_L [W]│   epsilon [%]
-     5.091e+07│     3.544e+07│     1.259e+07│             0│          69.6
+     5.091e+07│     3.544e+07│      1.26e+07│             0│          69.6
 ```
+
+`oilPump` gets a genuine exergy row for the same reason `cwp`/`condensatePump`/`feedPump` already did — it's a real, solved pump component. This is new: the oil loop only just became genuinely closed (with `oilPump` as a real component, not a `Source` boundary) — see "The cycle" above.
 
 Every feedwater heater now gets a genuine `E_F`/`E_P`/`E_D`/`ε` row costed
 directly from its own two real streams (`lpPreheater1`/`2`/`3`,
@@ -516,8 +559,8 @@ condenser: both sides are real now, so both sides get costed.
 
 **The network-level balance does not close, and that's disclosed here
 rather than left for a reader to discover.** A closed exergy balance would
-have `E_P + E_D + E_L = E_F`; this run gives 35.44 + 12.59 + 0 = 48.03 MW
-against `E_F` = 50.91 MW, a **2.88 MW (5.7%) gap**. Two known, separate
+have `E_P + E_D + E_L = E_F`; this run gives 35.44 + 12.60 + 0 = 48.04 MW
+against `E_F` = 50.91 MW, a **2.87 MW (5.6%) gap**. Two known, separate
 causes account for it, neither of which is a solver or a component error:
 
 1. **The network-level `fuel` is a Carnot approximation; the component
@@ -530,8 +573,8 @@ causes account for it, neither of which is a solver or a component error:
    reconcile, and the network-level fuel runs the higher of the two.
    Costing the network-level fuel natively from the oil stream as well
    would remove this term; that's a natural follow-up, not done here.
-2. **`fan` and `cwp` shaft work enters `E_D` with no matching `E_F`
-   entry.** Both are real modeled components whose destroyed exergy is
+2. **`fan`/`cwp`/`oilPump` shaft work enters `E_D` with no matching `E_F`
+   entry.** All three are real modeled components whose destroyed exergy is
    tallied into the network `E_D` total, but the electrical work driving
    them is not declared as a network-level fuel stream, so it appears on
    the destruction side of the balance only.
@@ -577,20 +620,25 @@ disclosed, understood simplification (a placeholder pump discharge
 pressure instead of a derived one) — not an unexplained discrepancy.
 
 The boiler-internals (economizer/drum/evaporator/superheater/reheater),
-cooling-water-loop/cooling-tower, and feedwater-heater/deaerator
-subsystems all converge cleanly as part of the same full-plant solve (42
-iterations, residual 2.3e-08) — there's no separate pass/fail gate for
+cooling-water-loop/cooling-tower, feedwater-heater/deaerator, and oil/HTF
+loop subsystems all converge cleanly as part of the same full-plant solve
+(43 iterations, residual 4.8e-08) — there's no separate pass/fail gate for
 them, since they're wired into the one `Network.solve()` this whole
-benchmark already runs.
-Lippke's Table 3 has no design data for either subsystem, so their own
-pass criteria are narrower than the turbine/mass-balance checks above:
-`sup` and `reheater` genuinely reach the published 371 C boiler/reheater
-outlet (see "Boiler internals"), and the closed cooling-water loop is
-internally consistent (`condenser`'s and `ct`'s duties agree to within
-0.1%, see "Cooling tower"). Everything else about these two subsystems —
-individual component duties, `UA`s, and exergy figures — is reported as
-ThermoWave's own result with no published number to check it against,
-disclosed as such rather than presented as a validated match.
+benchmark already runs. The oil loop is now genuinely closed
+(`oil_recycle`, through `oilPump` and a `solarField` stand-in) rather than
+a `Source`/`Sink` boundary — see "The cycle" above for the full
+degrees-of-freedom accounting, including why `eco` no longer has its own
+`Setpoint`.
+Lippke's Table 3 has no design data for the boiler-internals or
+cooling-tower subsystems, so their own pass criteria are narrower than
+the turbine/mass-balance checks above: `sup` and `reheater` genuinely
+reach the published 371 C boiler/reheater outlet (see "Boiler
+internals"), and the closed cooling-water loop is internally consistent
+(`condenser`'s and `ct`'s duties agree to within 0.1%, see "Cooling
+tower"). Everything else about these subsystems — individual component
+duties, `UA`s, and exergy figures — is reported as ThermoWave's own
+result with no published number to check it against, disclosed as such
+rather than presented as a validated match.
 
 ## Regenerating the plots
 
