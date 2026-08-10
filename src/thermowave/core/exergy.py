@@ -151,6 +151,7 @@ def node_exergy(state: "NetworkState", node: str, T0: float, P0: float) -> NodeE
     P, h = state.node(node)
     fluid = state.fluid_at(node)
     _require_entropy_for_exergy(fluid, node)
+    assert supports_entropy(fluid)
 
     T = fluid.temperature_ph(P, h)
     s = fluid.entropy_ph(P, h)

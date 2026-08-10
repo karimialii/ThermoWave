@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable
 from thermowave.components.base_component import BaseComponent
 from thermowave.core.exceptions import FluidRangeError
 from thermowave.core.settings import settings
-from thermowave.fluids.two_phase import require_two_phase
+from thermowave.fluids.two_phase import TwoPhaseFluid, require_two_phase, supports_two_phase
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -177,6 +177,7 @@ class Drum(BaseComponent):
                 f"Drum {name!r}: level_target must be in (0, 1), got {level_target}"
             )
         require_two_phase(fluid, f"Drum {name!r}")
+        assert supports_two_phase(fluid)
 
         self.name = name
         self.V = V
@@ -243,7 +244,7 @@ class Drum(BaseComponent):
         return self.P0, self.h0
 
     @staticmethod
-    def _level_from_ph(fluid: "BaseFluid", P: float, h: float, clamp: bool) -> float:
+    def _level_from_ph(fluid: "TwoPhaseFluid", P: float, h: float, clamp: bool) -> float:
         """Liquid volume fraction at (P, h).
 
         clamp=True (reporting) pins the mass quality to [0, 1] so a drum
@@ -298,6 +299,12 @@ class Drum(BaseComponent):
         P = state.param(f"{self.name}.P")
         h = state.param(f"{self.name}.h")
         fluid = state.fluid_at(self._feed_in_node)
+        # Unlike residuals(), this is a real, non-redundant check: callers
+        # (solve_transient(), or a direct unit test against a hand-built
+        # NetworkState) may reach state_derivative() without residuals()
+        # ever having run first.
+        require_two_phase(fluid, f"Drum {self.name!r}")
+        assert supports_two_phase(fluid)
         rho = fluid.density_ph(P, h)
 
         eps_P = max(abs(P) * 1.0e-6, 1.0)
@@ -365,6 +372,7 @@ class Drum(BaseComponent):
     def residuals(self, state: "NetworkState") -> list[float]:
         fluid = state.fluid_at(self._feed_in_node)
         require_two_phase(fluid, f"Drum {self.name!r}")
+        assert supports_two_phase(fluid)
         P_drum = state.param(f"{self.name}.P")
         h_drum = state.param(f"{self.name}.h")
 
@@ -391,6 +399,8 @@ class Drum(BaseComponent):
         P = state.param(f"{self.name}.P")
         h = state.param(f"{self.name}.h")
         fluid = state.fluid_at(self._feed_in_node)
+        require_two_phase(fluid, f"Drum {self.name!r}")
+        assert supports_two_phase(fluid)
 
         level = self._level_from_ph(fluid, P, h, clamp=True)
 

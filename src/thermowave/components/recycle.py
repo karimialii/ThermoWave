@@ -110,6 +110,12 @@ class Recycle(BaseComponent):
             return None
         actual = state.fluid_at(self._inlet_node)
         guess = self._fluid_guess
+        # Narrower than cantera_composition.supports_cantera_composition():
+        # this only needs mass_fractions() (to compare composition), not
+        # .mechanism too (nothing here mixes into a Cantera Solution the
+        # way Junction._blend()/Combustor._equilibrate() do) -- checking the
+        # wider contract here would reject a fluid that legitimately has no
+        # .mechanism but does expose mass_fractions().
         if not (hasattr(guess, "mass_fractions") and hasattr(actual, "mass_fractions")):
             return None
         guess_Y = guess.mass_fractions()

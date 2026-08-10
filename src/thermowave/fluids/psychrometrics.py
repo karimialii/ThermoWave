@@ -9,11 +9,18 @@ it structurally (hasattr on the specific method names below) rather than
 with isinstance(fluid, HumidAirFluid): checking for the actual methods a
 component calls, rather than a specific class, means any fluid exposing
 that contract qualifies -- same rationale as thermowave.fluids.two_phase.
+
+supports_humid_air() is TypeIs-typed for the same reason and with the same
+call-site caveat as thermowave.fluids.two_phase.supports_two_phase() -- see
+that module's docstring; a bare require_humid_air() statement gives mypy no
+narrowing, so callers follow it with a redundant `assert supports_humid_air(fluid)`.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
+
+from typing_extensions import TypeIs
 
 if TYPE_CHECKING:
     from thermowave.fluids.base_fluid import BaseFluid
@@ -26,7 +33,18 @@ _HUMID_AIR_METHODS = (
 )
 
 
-def supports_humid_air(fluid: "BaseFluid") -> bool:
+class HumidAirCapableFluid(Protocol):
+    """Structural type matching _HUMID_AIR_METHODS."""
+
+    name: str
+    W: float
+
+    def relative_humidity_pt(self, P: float, T: float) -> float: ...
+    def wet_bulb_pt(self, P: float, T: float) -> float: ...
+    def dew_point_pt(self, P: float, T: float) -> float: ...
+
+
+def supports_humid_air(fluid: "BaseFluid") -> TypeIs[HumidAirCapableFluid]:
     return all(hasattr(fluid, m) for m in _HUMID_AIR_METHODS)
 
 

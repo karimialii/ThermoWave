@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
-from thermowave.fluids.two_phase import require_two_phase
+from thermowave.fluids.two_phase import require_two_phase, supports_two_phase
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -75,6 +75,10 @@ class SimpleCondenser(BaseComponent):
 
     def _h_out_target(self, state: "NetworkState", P_out: float, h_in: float, mdot: float) -> float:
         fluid = state.fluid_at(self._inlet_node)
+        # residuals() already calls require_two_phase() on this same node's
+        # fluid; this assert is redundant at runtime, purely for mypy
+        # narrowing -- see two_phase.py's own docstring.
+        assert supports_two_phase(fluid)
         if self.duty is not None:
             return h_in + self.duty / max(mdot, _MIN_MDOT)
         if self.subcool > 0.0:
@@ -100,6 +104,8 @@ class SimpleCondenser(BaseComponent):
         P_out, h_out = state.node(self._outlet_node)
         mdot = state.mdot(self._inlet_node)
         fluid = state.fluid_at(self._outlet_node)
+        require_two_phase(fluid, f"SimpleCondenser {self.name!r}")
+        assert supports_two_phase(fluid)
 
         T_out = fluid.temperature_ph(P_out, h_out)
         T_sat = fluid.saturation_temperature(P_out)

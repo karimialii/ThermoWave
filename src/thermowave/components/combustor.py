@@ -7,6 +7,10 @@ from thermowave.components.heat_transfer import heat_loss_watts
 from thermowave.core.constants import MDOT_FUEL_GUESS_FRACTION
 from thermowave.core.exceptions import FluidRangeError
 from thermowave.fluids.base_fluid import BaseFluid
+from thermowave.fluids.cantera_composition import (
+    CanteraCompositionFluid,
+    supports_cantera_composition,
+)
 from thermowave.fluids.cantera_fluid import CanteraFluid, _CanteraCompositionFluid
 
 if TYPE_CHECKING:
@@ -201,7 +205,7 @@ class Combustor(BaseComponent):
         mdot_fuel: float,
         T_fuel: float | None = None,
         P_fuel: float | None = None,
-        fuel_fluid: "BaseFluid | None" = None,
+        fuel_fluid: "CanteraCompositionFluid | None" = None,
     ):
         ct = self._ct
         gas = self._gas
@@ -260,12 +264,14 @@ class Combustor(BaseComponent):
             mdot_fuel = self._fuel_flow(state)
             T_in = inlet_fluid.temperature_ph(P_in, h_in)
 
-            T_fuel, P_fuel, fuel_fluid = None, None, None
+            T_fuel: float | None = None
+            P_fuel: float | None = None
+            fuel_fluid: "CanteraCompositionFluid | None" = None
             if self.use_fuel_port:
                 P_fuel, h_fuel = state.node(self._fuel_in_node)
                 candidate = state.fluid_at(self._fuel_in_node)
                 T_fuel = candidate.temperature_ph(P_fuel, h_fuel)
-                if hasattr(candidate, "mass_fractions") and hasattr(candidate, "mechanism"):
+                if supports_cantera_composition(candidate):
                     # The fuel port's own resolved composition instead of
                     # the `fuel:1.0` mole-fraction string -- trusts the
                     # actual node fluid over a hardcoded default. Not

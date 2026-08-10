@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from thermowave.components.base_component import BaseComponent
 from thermowave.core.exceptions import FluidRangeError
-from thermowave.fluids.two_phase import supports_two_phase
+from thermowave.fluids.two_phase import TwoPhaseFluid, supports_two_phase
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -84,7 +84,7 @@ def _inlet_cp(fluid: "BaseFluid", P: float, T: float, h: Optional[float] = None)
 
 
 def _is_vapor_side(
-    fluid: "BaseFluid", P: float, T: float, T_sat: float, h: Optional[float]
+    fluid: "TwoPhaseFluid", P: float, T: float, T_sat: float, h: Optional[float]
 ) -> bool:
     """True if the state is on the vapor side of the dome. Uses h when the
     caller has it (the only way to tell saturated liquid from saturated

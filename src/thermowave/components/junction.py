@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
+from thermowave.fluids.cantera_composition import supports_cantera_composition
 from thermowave.fluids.cantera_fluid import _CanteraCompositionFluid
 
 if TYPE_CHECKING:
@@ -168,14 +169,17 @@ class Junction(BaseComponent):
 
     @staticmethod
     def _all_blendable(fluids: list["BaseFluid"]) -> bool:
+        # Not TypeIs-typed: TypeIs narrowing a list[BaseFluid] argument to
+        # list[CanteraCompositionFluid] doesn't work in mypy -- list is
+        # invariant, so list[CanteraCompositionFluid] isn't accepted as a
+        # narrowing of list[BaseFluid] regardless of any subtype relation
+        # between the elements. _blend() below narrows per-element instead,
+        # right where each fluid is actually used.
         first = fluids[0]
-        if not (hasattr(first, "mass_fractions") and hasattr(first, "mechanism")):
+        if not supports_cantera_composition(first):
             return False
         return all(
-            hasattr(f, "mass_fractions")
-            and hasattr(f, "mechanism")
-            and f.mechanism == first.mechanism
-            for f in fluids
+            supports_cantera_composition(f) and f.mechanism == first.mechanism for f in fluids
         )
 
     def _blend(self, state: "NetworkState", fluids: list["BaseFluid"]) -> "BaseFluid":
@@ -186,15 +190,23 @@ class Junction(BaseComponent):
         Reuses one lazily-created Solution (self._mix_gas) across every call
         instead of re-parsing the mechanism per Newton residual evaluation,
         the same cost-avoidance Combustor's own _product_gas already
-        established.
+        established. Only ever called after _all_blendable(fluids) has
+        already verified every entry supports_cantera_composition() -- the
+        per-element/per-`first` asserts below are redundant at runtime,
+        purely so mypy can narrow each one at its actual point of use (see
+        _all_blendable's own comment on why a single list-wide assert can't).
         """
+        first = fluids[0]
+        assert supports_cantera_composition(first)
+
         mdots = [state.mdot(node) for node in self._inlet_nodes]
         mdot_total = sum(mdots)
         if mdot_total < _MDOT_FLOOR:
-            return fluids[0]  # degenerate all-zero-flow guess; any answer is as good as any
+            return first  # degenerate all-zero-flow guess; any answer is as good as any
 
         species_mass: dict[str, float] = {}
         for fluid, mdot in zip(fluids, mdots):
+            assert supports_cantera_composition(fluid)
             for species, y in fluid.mass_fractions().items():
                 species_mass[species] = species_mass.get(species, 0.0) + mdot * y
         blended_Y = {species: mass / mdot_total for species, mass in species_mass.items()}
@@ -202,8 +214,8 @@ class Junction(BaseComponent):
         if self._mix_gas is None:
             import cantera as ct
 
-            self._mix_gas = ct.Solution(fluids[0].mechanism)
-        return _CanteraCompositionFluid(f"{self.name}.mix", self._mix_gas, blended_Y, fluids[0].mechanism)
+            self._mix_gas = ct.Solution(first.mechanism)
+        return _CanteraCompositionFluid(f"{self.name}.mix", self._mix_gas, blended_Y, first.mechanism)
 
     def warm_start_pairs(self) -> list[tuple[str, str]]:
         # Port names here are in0/out0/... rather than the single-pair

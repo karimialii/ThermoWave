@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
-from thermowave.fluids.two_phase import require_entropy
+from thermowave.fluids.two_phase import (
+    require_entropy,
+    require_two_phase,
+    supports_entropy,
+    supports_two_phase,
+)
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -66,6 +71,7 @@ class SteamTurbine(BaseComponent):
     def residuals(self, state: "NetworkState") -> list[float]:
         fluid = state.fluid_at(self._inlet_node)
         require_entropy(fluid, f"SteamTurbine {self.name!r}")
+        assert supports_entropy(fluid)
         P_in, h_in = state.node(self._inlet_node)
         P_out, h_out = state.node(self._outlet_node)
 
@@ -82,6 +88,13 @@ class SteamTurbine(BaseComponent):
         P_in, h_in = state.node(self._inlet_node)
         P_out, h_out = state.node(self._outlet_node)
         fluid = state.fluid_at(self._outlet_node)
+        # residuals() only requires entropy support (a superset for
+        # IdealGasFluid/IdealGasMixtureFluid, which have no two-phase dome
+        # at all) -- x_out below needs quality_ph specifically, so check for
+        # it here too rather than letting a non-two-phase fluid crash with a
+        # bare AttributeError on this line.
+        require_two_phase(fluid, f"SteamTurbine {self.name!r}")
+        assert supports_two_phase(fluid)
         return {
             "power [W]": state.mdot(self._inlet_node) * (h_in - h_out),
             "eta_s [-]": self.eta_s,

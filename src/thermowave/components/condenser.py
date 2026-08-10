@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
-from thermowave.fluids.two_phase import require_two_phase
+from thermowave.fluids.two_phase import require_two_phase, supports_two_phase
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -132,6 +132,8 @@ class Condenser(BaseComponent):
         P_wf_out, h_wf_out = state.node(self._wf_out_node)
         P_cool_out, h_cool_out = state.node(self._cool_out_node)
         cool_fluid = state.fluid_at(self._cool_out_node)
+        require_two_phase(wf_fluid, f"Condenser {self.name!r}")
+        assert supports_two_phase(wf_fluid)
 
         T_sat = wf_fluid.saturation_temperature(P_wf_out)
         T_cool_out = cool_fluid.temperature_ph(P_cool_out, h_cool_out)

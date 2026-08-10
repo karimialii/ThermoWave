@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
-from thermowave.fluids.two_phase import require_entropy
+from thermowave.fluids.two_phase import require_entropy, supports_entropy
 
 if TYPE_CHECKING:
     from thermowave.core.network import NetworkState
@@ -64,6 +64,7 @@ class Pump(BaseComponent):
     def residuals(self, state: "NetworkState") -> list[float]:
         fluid = state.fluid_at(self._inlet_node)
         require_entropy(fluid, f"Pump {self.name!r}")
+        assert supports_entropy(fluid)
         P_in, h_in = state.node(self._inlet_node)
         P_out, h_out = state.node(self._outlet_node)
 

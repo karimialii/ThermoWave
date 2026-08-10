@@ -8,18 +8,25 @@ the ImportError still arrives when you construct one.
 """
 
 from thermowave.fluids.base_fluid import BaseFluid, ConstantCpFluid
+from thermowave.fluids.cantera_composition import CanteraCompositionFluid
 from thermowave.fluids.cantera_fluid import CanteraFluid
 from thermowave.fluids.humid_air import HumidAirFluid
 from thermowave.fluids.ideal_gas import IdealGasFluid
 from thermowave.fluids.ideal_gas_mixture import IdealGasMixtureFluid
+from thermowave.fluids.psychrometrics import HumidAirCapableFluid
 from thermowave.fluids.real_fluid import CoolPropFluid
+from thermowave.fluids.two_phase import EntropyFluid, TwoPhaseFluid
 
 __all__ = [
     "BaseFluid",
+    "CanteraCompositionFluid",
     "CanteraFluid",
     "ConstantCpFluid",
     "CoolPropFluid",
+    "EntropyFluid",
+    "HumidAirCapableFluid",
     "HumidAirFluid",
     "IdealGasFluid",
     "IdealGasMixtureFluid",
+    "TwoPhaseFluid",
 ]
