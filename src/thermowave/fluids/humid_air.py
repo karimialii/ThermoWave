@@ -204,6 +204,36 @@ class HumidAirFluid(BaseFluid):
     # these via thermowave.fluids.psychrometrics.supports_humid_air() rather
     # than isinstance -- see that module's docstring.
 
+    def humidity_ratio_at_rh(self, P: float, T: float, RH: float) -> float:
+        """Humidity ratio [kg/kg] a state at (P, T) would have at the given
+        relative humidity [-, 0..1] -- independent of this instance's own W
+        (same computation from_relative_humidity() does at construction
+        time, exposed here for use at residual-evaluation time too).
+
+        Deliberately the robust direction for a Newton residual that wants
+        "pin this state to N% RH": computing W FROM (P, T, RH) is always
+        well-posed for any valid RH in [0, 1], whereas computing RH as an
+        OUTPUT of a candidate (P, T, W) -- e.g. via relative_humidity_pt()
+        -- makes HAPropsSI hard-fail outright for a state that comes out
+        even marginally supersaturated (RH computed slightly > 1), which a
+        Newton trial iterate (or finite-difference Jacobian perturbation)
+        legitimately passes through on the way to a converged, exactly-
+        saturated answer. Prefer this direction -- "W_target(T) via RH input,
+        then residual = W - W_target" -- over relative_humidity_pt() for
+        any component pinning a stream to a target RH, the same "derive the
+        target state, don't inspect a computed one" pattern Condenser's own
+        _h_wf_out_target uses.
+        """
+        self._validate_pressure(P)
+        self._validate_temperature(T)
+        try:
+            return self._ha_props_si("W", "T", T, "RH", RH, "P", P)
+        except ValueError as exc:
+            raise FluidRangeError(
+                f"HumidAirFluid humidity_ratio_at_rh failed for P={P}, T={T}, RH={RH}, "
+                f"fluid={self.name}: {exc}"
+            ) from exc
+
     def relative_humidity_pt(self, P: float, T: float) -> float:
         """Relative humidity [-, 0..1] at pressure P [Pa], temperature T [K],
         for this fluid's own fixed W."""

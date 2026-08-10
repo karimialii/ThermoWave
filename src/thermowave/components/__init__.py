@@ -18,6 +18,7 @@ from thermowave.components.combustor import Combustor
 from thermowave.components.compressor import Compressor
 from thermowave.components.condenser import Condenser
 from thermowave.components.controller import Controller
+from thermowave.components.cooling_tower import CoolingTower
 from thermowave.components.deaerator import Deaerator
 from thermowave.components.drum import Drum
 from thermowave.components.electric_motor import ElectricMotor
@@ -69,6 +70,7 @@ __all__ = [
     "Conduction",
     "Controller",
     "Convection",
+    "CoolingTower",
     "Deaerator",
     "Drum",
     "ElectricMotor",
