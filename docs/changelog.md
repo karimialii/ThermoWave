@@ -4,6 +4,19 @@ Notable changes to ThermoWave, in reverse chronological order. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to the `[project] version` in `pyproject.toml`.
 
+## 0.9.3 — 2026-08-11
+
+### Fixed
+
+- **`Source` accepted invalid boundary conditions silently.** Every
+  efficiency-bearing component (`Compressor`, `Turbine`, `Pump`, ...)
+  raises `ValueError` on out-of-range inputs at construction, but
+  `Source` -- the boundary condition every network's inlet conditions
+  flow through -- took `P`, `T`, and `mdot` with no check at all. It now
+  raises `ValueError` for `P <= 0`, non-positive absolute `T`, or
+  negative `mdot`, instead of leaving it to whatever the fluid-property
+  backend downstream happened to do with them.
+
 ## 0.9.2 — 2026-08-11
 
 ### Docs
