@@ -1,5 +1,7 @@
 # Recycle
 
+<img src="../../_static/diagrams/recycle.svg" alt="Recycle diagram" class="component-diagram">
+
 Mass-flow anchor for a genuinely closed loop — no `Source`/`Sink` needed.
 
 **Ports:** `in`, `out`

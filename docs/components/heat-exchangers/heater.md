@@ -1,5 +1,7 @@
 # SimpleHeater
 
+<img src="../../_static/diagrams/simple_heater.svg" alt="SimpleHeater diagram" class="component-diagram">
+
 Single-stream heater targeting a fixed outlet **temperature**, without
 modeling the second stream that supplies the heat — the single-phase-safe
 counterpart to [`SimpleEvaporator`](evaporator.md)'s outlet-spec mode.

@@ -114,6 +114,8 @@ neither assumed efficiency should be mistaken for a validated figure.
 
 ## The network
 
+![Cycle layout](orc11kwe.svg)
+
 ```
 Pump(P_out=p_evap, eta=0.75)             # PUMP_ETA_ASSUMED, see above
     -> SimpleEvaporator(superheat=T_superheat)
