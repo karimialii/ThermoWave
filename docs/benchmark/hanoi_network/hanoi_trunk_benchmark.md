@@ -1,4 +1,4 @@
-# Benchmark: Hanoi water-distribution network (trunk)
+# Benchmark: [Hanoi water-distribution network (trunk)](https://github.com/karimialii/hanoi-trunk-benchmark)
 
 `hanoi_trunk_benchmark.py` checks a chain of ThermoWave `Pipe` + `Junction`
 components against the Hanoi water-distribution network — a real trunk-main

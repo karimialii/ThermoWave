@@ -1,4 +1,4 @@
-# Benchmark: NASA Rotor 37
+# Benchmark: (NASA Rotor 37)[https://github.com/karimialii/rotor37-benchmark]
 
 `rotor37_benchmark.py` checks ThermoWave's `SimpleCompressor` against the
 published design point of NASA Rotor 37, a transonic axial compressor rotor

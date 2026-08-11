@@ -1,4 +1,4 @@
-# Benchmark: 30 MWe SEGS solar Rankine cycle, design point
+# Benchmark: [30 MWe SEGS solar Rankine cycle, design point](https://github.com/karimialii/segs-exergy-benchmark)
 
 **PASS.** `segs_exergy_benchmark.py` builds and solves the water/steam
 power cycle of a 30 MWe SEGS (Solar Energy Generating System)

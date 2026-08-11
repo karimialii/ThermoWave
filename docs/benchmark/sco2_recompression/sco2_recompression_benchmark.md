@@ -1,4 +1,4 @@
-# Benchmark: recompression supercritical-CO2 Brayton cycle
+# Benchmark: [recompression supercritical-CO2 Brayton cycle](https://github.com/karimialii/sco2-recompression-benchmark)
 
 `sco2_recompression_benchmark.py` builds and solves a full recompression
 sCO2 power cycle in ThermoWave and compares it directly against a real
@@ -27,8 +27,6 @@ Reproducing this cycle exercises four ThermoWave capabilities together:
 | `core/exergy.py` | The E_F/E_P/E_D/epsilon comparison table below |
 | Entropy-based turbomachinery | CO2 uses CoolProp, which already provides entropy, but `SteamTurbine`/`Pump`'s entropy-based physics is what makes them the right choice this close to CO2's critical point (see "Why `Pump`/`SteamTurbine`" below) |
 
-The script and its plotting code live in their own standalone repo:
-https://github.com/karimialii/sco2-recompression-benchmark
 
 ```bash
 git clone https://github.com/karimialii/sco2-recompression-benchmark
