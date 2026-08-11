@@ -11,6 +11,7 @@ dist/
 /examples/
 /tutorials/
 docs/superpowers/
+docs/benchmark/Tespy Benchmark/
 
 # benchmark simulation scripts now live in their own standalone repos --
 # see the "Full write-up" link in each docs/benchmark/*/*.md page.
