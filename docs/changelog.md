@@ -4,6 +4,23 @@ Notable changes to ThermoWave, in reverse chronological order. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to the `[project] version` in `pyproject.toml`.
 
+## 0.9.2 — 2026-08-11
+
+### Docs
+
+- Every benchmark's runnable script now lives in its own standalone public
+  repo (`karimialii/<name>-benchmark`) instead of a gitignored copy at the
+  package repo root — each is independently cloneable, with its own
+  README, license, and plotting code. The docs pages here keep the full
+  written analysis and pre-rendered plots, linking out to the
+  corresponding repo for "run it yourself."
+- New component diagrams for `Recycle` and `SimpleHeater` (previously
+  text-only pages); refreshed `FeedwaterHeater`/`SimpleCondenser`/
+  `SimpleEvaporator` artwork; the SEGS and ORC benchmark pages now embed
+  their own plant/cycle layout diagrams.
+- No source code changes in this release — version bump is so Read the
+  Docs' `stable` alias (which tracks the latest tag) picks up the above.
+
 ## 0.9.1 — 2026-08-11
 
 ### Fixed
