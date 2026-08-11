@@ -99,6 +99,46 @@ result = net.solve()
 result.print_report()
 ```
 
+## A closed thermosiphon (natural-circulation) loop
+
+No pump: a heated riser and a cooled downcomer, `z_in`/`z_out` giving each
+`Pipe` its elevation. `Source(mdot=None)` leaves mass flow a free Newton
+unknown — the loop's own momentum residuals settle at whatever `mdot`
+balances friction in both legs against the buoyancy created by the riser
+running hot/light and the downcomer running cold/dense. `Source`/`Sink` sit
+at the same pressure, standing in for the pressurizer or expansion tank a
+real closed loop needs to anchor its absolute pressure. See
+[`Pipe`](../components/flow-elements/pipe.md) for the underlying
+`Δp_gravity = ρ g Δz` term.
+
+```python
+from thermowave.core.network import Network
+from thermowave.fluids.ideal_gas import IdealGasFluid
+from thermowave.components import Source, SimpleHeater, Pipe, Sink
+
+air = IdealGasFluid(name="air", R=287.05, cp=1005.0)
+net = Network(fluid=air)
+
+H = 5.0  # riser/downcomer height [m]
+src = Source(name="src", P=101_325.0, T=300.0, mdot=None, mdot_guess=0.05)
+heater = SimpleHeater(name="heater", T_out=340.0)
+riser = Pipe(name="riser", L=H, D=0.15, roughness=1e-5, mu=1.8e-5, z_in=0.0, z_out=H)
+cooler = SimpleHeater(name="cooler", T_out=300.0)
+downcomer = Pipe(name="downcomer", L=H, D=0.15, roughness=1e-5, mu=1.8e-5, z_in=H, z_out=0.0)
+snk = Sink(name="snk", P=101_325.0)
+
+for c in (src, heater, riser, cooler, downcomer, snk):
+    net.add_component(c)
+net.connect(src, "out", heater, "in")
+net.connect(heater, "out", riser, "in")
+net.connect(riser, "out", cooler, "in")
+net.connect(cooler, "out", downcomer, "in")
+net.connect(downcomer, "out", snk, "in")
+
+result = net.solve()
+print("circulation mdot [kg/s]:", result.node_mdot["riser.in"])
+```
+
 ## A PID-controlled setpoint change
 
 Swap a steady `Controller` for a `PIDController` and step a setpoint —

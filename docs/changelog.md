@@ -4,6 +4,21 @@ Notable changes to ThermoWave, in reverse chronological order. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to the `[project] version` in `pyproject.toml`.
 
+## 0.9.4 — 2026-08-11
+
+### Added
+
+- **`Pipe` gains `z_in`/`z_out` elevation parameters** (both `0.0` by
+  default, no change to existing models). Each element now adds a
+  hydrostatic/buoyancy term `Δp_gravity = ρ g Δz_elem` to its momentum
+  residual alongside friction. This is enough, with no new solver
+  machinery, to model thermosiphon / natural-circulation loops: a heated
+  riser and a cooled downcomer chained into a closed loop with a free mass
+  flow (`Source(mdot=None)`, no pump) settle at whatever `mdot` balances
+  friction against the buoyancy created by the two legs' density
+  difference. See [`Pipe`](components/flow-elements/pipe.md) and the
+  [thermosiphon-loop example](examples/index.md#a-closed-thermosiphon-natural-circulation-loop).
+
 ## 0.9.3 — 2026-08-11
 
 ### Fixed

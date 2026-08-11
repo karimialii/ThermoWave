@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from thermowave.components.base_component import BaseComponent
 from thermowave.components.heat_transfer import heat_loss_watts
+from thermowave.core.constants import STANDARD_GRAVITY_M_S2
 from thermowave.core.settings import settings
 
 if TYPE_CHECKING:
@@ -59,6 +60,19 @@ class Pipe(BaseComponent):
     with n_elem>1 every element shares the same total loss, split evenly, not
     a per-element pick), so build the path after this Pipe already exists, or
     set it afterwards via pipe.set(heat_path=path).
+
+    z_in/z_out: elevation [m] of the inlet/outlet, both 0.0 by default (no
+    effect, exactly today's behavior). Given non-equal, each element also
+    gets a hydrostatic/buoyancy term rho*g*(z_out-z_in)/n_elem added to its
+    momentum residual alongside dp_friction, using that same element's own
+    inlet density -- rising elevation (z_out > z_in) reduces P_out relative
+    to P_in the way a real fluid column's weight does, on top of friction;
+    falling elevation raises it. This is what lets a closed loop of Pipes
+    (a heated riser, a cooled downcomer) circulate under buoyancy alone —
+    no pump needed, no new solver machinery: the loop's existing momentum
+    residuals already select the equilibrium mdot the same way they always
+    do, once density differs between legs enough to matter. See the
+    thermosiphon example in docs/examples for a full worked loop.
     """
 
     def __init__(
@@ -72,6 +86,8 @@ class Pipe(BaseComponent):
         n_elem: int = 1,
         heat_loss: float | None = None,
         heat_path: BaseComponent | list | tuple | None = None,
+        z_in: float = 0.0,
+        z_out: float = 0.0,
     ):
         if f is None and (roughness is None or mu is None):
             raise ValueError(
@@ -87,6 +103,8 @@ class Pipe(BaseComponent):
         self.n_elem = n_elem
         self.heat_loss = heat_loss
         self.heat_path = heat_path
+        self.z_in = z_in
+        self.z_out = z_out
         self._inlet_node = f"{name}.in"
         self._outlet_node = f"{name}.out"
         self._area = math.pi * D**2 / 4
@@ -121,6 +139,7 @@ class Pipe(BaseComponent):
     def residuals(self, state: "NetworkState") -> list[float]:
         nodes = self._element_nodes()
         elem_L = self.L / self.n_elem
+        elem_dz = (self.z_out - self.z_in) / self.n_elem
         total_loss = (self.heat_loss or 0.0) + heat_loss_watts(self.heat_path, state)
         q_elem = total_loss / self.n_elem
         mdot = state.mdot(self._inlet_node)
@@ -139,7 +158,8 @@ class Pipe(BaseComponent):
             v = mdot / (rho * self._area)
             f = self._friction_factor(rho, v)
             dp_friction = f * (elem_L / self.D) * (rho * v**2 / 2)
-            out.append(P_in - P_out - dp_friction)
+            dp_gravity = rho * STANDARD_GRAVITY_M_S2 * elem_dz
+            out.append(P_in - P_out - dp_friction - dp_gravity)
             out.append(h_in - h_out - q_elem / max(mdot, _MIN_MDOT))
         out.append(state.mdot(self._outlet_node) - mdot)
         return out

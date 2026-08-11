@@ -17,6 +17,9 @@ MDOT_FUEL_GUESS_FRACTION = 0.02  # ~2% fuel-air ratio, a plausible gas-turbine
 
 STEFAN_BOLTZMANN = 5.670374419e-8  # W/(m^2*K^4), for Radiation's Q ~ T^4 law
 
+STANDARD_GRAVITY_M_S2 = 9.80665  # m/s^2, for Pipe's elevation (z_in/z_out)
+# hydrostatic/buoyancy term
+
 MDOT_FLOOR = 1.0e-9  # kg/s, floor for heat_loss/mdot divisions at a
 # degenerate-but-real zero-flow state (an isolated/shut-off branch, or a
 # transient Newton iterate clamped near zero) in Compressor/SimpleCompressor/
