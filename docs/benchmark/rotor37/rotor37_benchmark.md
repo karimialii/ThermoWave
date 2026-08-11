@@ -10,15 +10,16 @@ residual equations encode the isentropic-efficiency relation correctly. A
 pressure-ratio sweep (below) then shows where that single design point
 sits on the compressor's broader operating range.
 
-Run it directly, no optional extras required:
+The script and its plotting code live in their own standalone repo:
+https://github.com/karimialii/rotor37-benchmark
 
 ```bash
+git clone https://github.com/karimialii/rotor37-benchmark
+cd rotor37-benchmark
 python rotor37_benchmark.py
 ```
 
-The script lives at the repo root and isn't tracked in git (gitignored —
-it'll move to its own repo later); run it from the ThermoWave repo root as
-shown above.
+No optional extras required (`IdealGasFluid` has no external dependency).
 
 ## The reference data
 
@@ -140,14 +141,17 @@ formula, so of course they match. What that number doesn't show is *where*
 Rotor 37's design point sits relative to the compressor's broader operating
 range.
 
-`plot_results.py` (same directory as this file) fills that gap. It builds
-and solves a fresh ThermoWave network — through the actual solver, not the
-hand-calc formula — at 41 pressure ratios spanning 1.5 to 2.5, holding
-`eta_s`, inlet state, and mass flow at their published design values, and
-records the solved shaft power and exit temperature at each point:
+`plot_results.py`, in the [benchmark's own
+repo](https://github.com/karimialii/rotor37-benchmark), fills that gap. It
+builds and solves a fresh ThermoWave network — through the actual solver,
+not the hand-calc formula — at 41 pressure ratios spanning 1.5 to 2.5,
+holding `eta_s`, inlet state, and mass flow at their published design
+values, and records the solved shaft power and exit temperature at each
+point:
 
 ```bash
-python docs/benchmark/rotor37/plot_results.py
+pip install thermowave[plot]
+python plot_results.py
 ```
 
 ![ThermoWave PR sweep around the Rotor 37 design point](pr_sweep.png)

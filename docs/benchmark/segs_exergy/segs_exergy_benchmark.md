@@ -23,14 +23,15 @@ balance closes exactly through the drain cascade as a solver-enforced
 identity, and gross mechanical output is 36457 kW (paper: 36067 kW,
 Fig. 4).
 
-Run it directly (needs the `coolprop` extra):
+The script and its plotting code live in their own standalone repo:
+https://github.com/karimialii/segs-exergy-benchmark
 
 ```bash
+git clone https://github.com/karimialii/segs-exergy-benchmark
+cd segs-exergy-benchmark
 pip install thermowave[coolprop]
 python segs_exergy_benchmark.py
 ```
-
-(The script lives at the repo root and is gitignored there.)
 
 ## The cycle
 
@@ -342,9 +343,14 @@ feedback loops instead of one-shot design-point targets).
 
 ## Regenerating the plots
 
-`plot_results.py` re-runs the benchmark's own two-stage `build_network()`/
-`solve()` and writes all four PNGs above:
+`plot_results.py`, in the [benchmark's own
+repo](https://github.com/karimialii/segs-exergy-benchmark), re-runs the
+benchmark's two-stage `build_network()`/`solve()` and writes all four PNGs
+above into `assets/`:
 
 ```bash
-python docs/benchmark/segs_exergy/plot_results.py
+git clone https://github.com/karimialii/segs-exergy-benchmark
+cd segs-exergy-benchmark
+pip install thermowave[coolprop,plot]
+python plot_results.py
 ```

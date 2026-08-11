@@ -6,12 +6,10 @@ own numbers — not a synthetic test case. Every page includes plots of the
 solved result against the published reference data, plus the reasoning
 and derivations behind the comparison.
 
-The runnable `.py` script behind each page lives at the repo root (e.g.
-`sco2_recompression_benchmark.py`), not inside `docs/`. Each of these
-scripts is planned to move to its own standalone repository, so for now
-they're kept out of this repo's git history — the run command shown on
-each page is what you'd use if you have the script locally, but it won't
-be present in a fresh clone.
+The runnable `.py` script behind each page lives in its own standalone
+repo (linked from that page, alongside a `git clone` command) rather than
+in this one — each is a small, independently cloneable project with its
+own README and plotting code.
 
 ```{toctree}
 :maxdepth: 1

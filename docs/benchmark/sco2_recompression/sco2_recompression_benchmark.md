@@ -27,48 +27,27 @@ Reproducing this cycle exercises four ThermoWave capabilities together:
 | `core/exergy.py` | The E_F/E_P/E_D/epsilon comparison table below |
 | Entropy-based turbomachinery | CO2 uses CoolProp, which already provides entropy, but `SteamTurbine`/`Pump`'s entropy-based physics is what makes them the right choice this close to CO2's critical point (see "Why `Pump`/`SteamTurbine`" below) |
 
-Run it directly (needs the `coolprop` extra):
+The script and its plotting code live in their own standalone repo:
+https://github.com/karimialii/sco2-recompression-benchmark
 
 ```bash
+git clone https://github.com/karimialii/sco2-recompression-benchmark
+cd sco2-recompression-benchmark
 pip install thermowave[coolprop]
 python sco2_recompression_benchmark.py
 ```
 
-The script itself lives at the repo root, not under `docs/`, and isn't
-tracked in git (it's gitignored — it will move into its own standalone
-repo later). The plots below are regenerated from its solved result via
-`plot_results.py`, which lives alongside this file:
+The plots below are regenerated from its solved result via
+`plot_results.py`, which lives alongside the benchmark script in that repo:
 
 ```bash
-python docs/benchmark/sco2_recompression/plot_results.py
+pip install thermowave[coolprop,plot]
+python plot_results.py
 ```
 
 ## The cycle — paper's Figure 1(c), "Recompression, recuperated sCO2 cycle"
 
 ![Recompression sCO2 cycle schematic: heater, turbine, two recuperators, the recompression split, cooler, and both compressors, closing back on itself](cycle.svg)
-
-```
-                     ┌─────────────────────────── C-1b "cp2" (recompression) ──┐
-                     │                                                          │
-  Recycle ──► E-4 "heater" [4] 600C/250bar ──► T-1 "turb" ──► E-2b "rec2" hot ──► E-2a "rec1" hot ──► sp1 (free split)
-  (mdot anchor)  (external heat, T target)      [5]        [14]           [15]           node 15 = split point
-                                                                     │
-                    out0 (main branch, ~73% of flow)      out1 (recompression, ~27%)
-                     │                                              │
-                     ▼                                              │
-              E-3 "cooler" [1]/[6]                                  │
-                     │                                              │
-                     ▼                                              │
-              C-1a "cp1" [2] ──► E-2a "rec1" cold [12] ──┐           │
-                                                          ▼           ▼
-                                                   m1 (merge, matched by Controller)
-                                                          │ [13]
-                                                          ▼
-                                            E-2a "rec1" ──► E-2b "rec2" cold [3]
-                                            (cold in already used above)   │
-                                                                            ▼
-                                                                  (back to Recycle)
-```
 
 **What this benchmark shows**: given design-point data derived once from
 the paper's own tables (see below), ThermoWave reproduces the cycle's

@@ -18,16 +18,15 @@ the largest deviations (9-11%) right after the network's one branch point
 and the closest agreement (under 1%) at both ends of the trunk. See
 [Results](#results) below.
 
-Run it directly (needs the `coolprop` extra):
+The script and its plotting code live in their own standalone repo:
+https://github.com/karimialii/hanoi-trunk-benchmark
 
 ```bash
+git clone https://github.com/karimialii/hanoi-trunk-benchmark
+cd hanoi-trunk-benchmark
 pip install thermowave[coolprop]
 python hanoi_trunk_benchmark.py
 ```
-
-The script lives at the repo root (not in this docs folder) and isn't
-tracked in git — it's gitignored there and will move to its own repository
-later. Run it from the repo root as shown above.
 
 ## The reference data
 
@@ -101,9 +100,10 @@ Reynolds-number-dependent Colebrook friction factor does. From node 6
 onward the deviation shrinks again and even flips sign, ending at +2.1% at
 the dead-end node 13.
 
-(Regenerate the plot with `python docs/benchmark/hanoi_network/plot_results.py`
-— it imports and re-runs the benchmark script itself, so the figure can
-never drift out of sync with the printed numbers above.)
+(Regenerate the plot with `plot_results.py` in the [benchmark's own
+repo](https://github.com/karimialii/hanoi-trunk-benchmark) — it imports and
+re-runs the benchmark script itself, so the figure can never drift out of
+sync with the printed numbers above.)
 
 ## Why only the trunk (nodes 1–13), not the full 32-node network
 

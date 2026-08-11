@@ -12,14 +12,8 @@ dist/
 /tutorials/
 docs/superpowers/
 
-# benchmark simulation scripts live at repo root for now (each one is
-# destined to become its own standalone repository) -- not tracked here
-/sco2_recompression_benchmark.py
-/segs_exergy_benchmark.py
-/orc11kwe_benchmark.py
-/rotor37_benchmark.py
-/hanoi_trunk_benchmark.py
-
+# benchmark simulation scripts now live in their own standalone repos --
+# see the "Full write-up" link in each docs/benchmark/*/*.md page.
 
 # example/showcase run output written to repo root — regenerate via the
 # scripts in examples/, don't commit ad hoc; move curated ones to assets/images/
