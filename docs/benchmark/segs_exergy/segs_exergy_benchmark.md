@@ -23,9 +23,6 @@ balance closes exactly through the drain cascade as a solver-enforced
 identity, and gross mechanical output is 36457 kW (paper: 36067 kW,
 Fig. 4).
 
-The script and its plotting code live in their own standalone repo:
-https://github.com/karimialii/segs-exergy-benchmark
-
 ```bash
 git clone https://github.com/karimialii/segs-exergy-benchmark
 cd segs-exergy-benchmark

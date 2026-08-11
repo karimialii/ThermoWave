@@ -10,8 +10,6 @@ residual equations encode the isentropic-efficiency relation correctly. A
 pressure-ratio sweep (below) then shows where that single design point
 sits on the compressor's broader operating range.
 
-The script and its plotting code live in their own standalone repo:
-https://github.com/karimialii/rotor37-benchmark
 
 ```bash
 git clone https://github.com/karimialii/rotor37-benchmark

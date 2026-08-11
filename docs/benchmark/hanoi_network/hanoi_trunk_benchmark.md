@@ -18,8 +18,6 @@ the largest deviations (9-11%) right after the network's one branch point
 and the closest agreement (under 1%) at both ends of the trunk. See
 [Results](#results) below.
 
-The script and its plotting code live in their own standalone repo:
-https://github.com/karimialii/hanoi-trunk-benchmark
 
 ```bash
 git clone https://github.com/karimialii/hanoi-trunk-benchmark
