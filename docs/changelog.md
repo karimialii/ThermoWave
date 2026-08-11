@@ -4,6 +4,26 @@ Notable changes to ThermoWave, in reverse chronological order. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to the `[project] version` in `pyproject.toml`.
 
+## 0.9.1 — 2026-08-11
+
+### Fixed
+
+- **Exergy analysis silently skipped `FeedwaterHeater`.** `FeedwaterHeater`
+  is a genuine two-stream exchanger (it shares `HeatExchanger`'s default
+  `hot_in`/`hot_out`/`cold_in`/`cold_out` port names) but wasn't registered
+  in `thermowave.core.exergy`'s two-stream dispatch, so it fell through
+  every branch with no `E_F`/`E_P`/`E_D` row and no contribution to the
+  network totals — the same failure mode `Condenser` needed fixing for
+  previously. Now costed identically to any other two-stream exchanger.
+
+### Docs
+
+- SEGS benchmark doc/plots no longer reference TESPy — every design value
+  (`ttd_u`/`ttd_l`) is now framed as a standard closed-FWH design target,
+  not a TESPy-sourced one. Adds the plant layout diagram and two new
+  plots (solved FWH `ttd` vs. target, solved vs. Table 3 extraction
+  split).
+
 ## 0.9.0 — 2026-08-10
 
 ### Added
