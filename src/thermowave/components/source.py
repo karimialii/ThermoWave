@@ -61,9 +61,17 @@ class Source(BaseComponent):
         mdot_guess: float = 1.0,
         fluid: "BaseFluid | None" = None,
     ):
+        if P <= 0.0:
+            raise ValueError(f"Source {name!r}: P must be > 0, got {P}")
+        T_si = settings.temperature_to_si(T)
+        if T_si <= 0.0:
+            raise ValueError(f"Source {name!r}: T must be > 0 absolute, got {T}")
+        if mdot is not None and mdot < 0.0:
+            raise ValueError(f"Source {name!r}: mdot must be >= 0, got {mdot}")
+
         self.name = name
         self.P_si = settings.pressure_to_si(P)
-        self.T_si = settings.temperature_to_si(T)
+        self.T_si = T_si
         self.mdot = mdot
         self.mdot_guess = mdot_guess
         self.fluid = fluid
